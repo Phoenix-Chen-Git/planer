@@ -1,0 +1,12 @@
+name: plan_and_log
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - openai>=1.0.0
+      - python-dotenv>=1.0.0
+      - pyyaml>=6.0
+      - rich>=13.0.0

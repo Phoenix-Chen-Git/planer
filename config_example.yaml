@@ -1,0 +1,19 @@
+daily_jobs:
+  - name: "Morning Exercise"
+    description: "Physical activity to start the day"
+  - name: "Work Tasks"
+    description: "Professional responsibilities and projects"
+  - name: "Learning"
+    description: "Study or skill development"
+  - name: "Personal Projects"
+    description: "Side projects or hobbies"
+
+deepseek:
+  model: "deepseek-chat"
+  temperature: 0.7
+  max_tokens: 2000
+  api_base: "https://api.deepseek.com"
+
+preferences:
+  timezone: "Asia/Shanghai"
+  language: "en"
