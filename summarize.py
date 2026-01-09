@@ -14,6 +14,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
 from rich.prompt import Prompt, Confirm
+import questionary
 
 
 def review_sub_jobs(console, sub_jobs: list, depth: int = 1) -> list:
@@ -37,11 +38,14 @@ def review_sub_jobs(console, sub_jobs: list, depth: int = 1) -> list:
         console.print(f"{indent}[cyan]└─ {sub_job['name']}[/cyan]")
         console.print(f"{indent}   [dim]{sub_job['description']}[/dim]")
         
-        status = Prompt.ask(
+        status = questionary.select(
             f"{indent}   Did you finish this?",
-            choices=["yes", "no", "partial"],
-            default="yes"
-        )
+            choices=["Yes", "No", "Partial"],
+            use_arrow_keys=True
+        ).ask()
+        
+        if not status:
+            status = "Yes"
         
         review = {
             'task_name': sub_job['name'],
@@ -49,14 +53,14 @@ def review_sub_jobs(console, sub_jobs: list, depth: int = 1) -> list:
             'sub_reviews': []
         }
         
-        if status == "yes":
-            quality = Prompt.ask(
+        if status == "Yes":
+            quality = questionary.select(
                 f"{indent}   How did it go?",
-                choices=["excellent", "good", "okay"],
-                default="good"
-            )
-            review['quality'] = quality
-        elif status in ["no", "partial"]:
+                choices=["Excellent", "Good", "Okay"],
+                use_arrow_keys=True
+            ).ask()
+            review['quality'] = quality if quality else "Good"
+        elif status in ["No", "Partial"]:
             problem = Prompt.ask(f"{indent}   What was the problem?")
             review['problem'] = problem
         
@@ -125,11 +129,14 @@ def main():
             console.print(f"[dim]Planned: {job['user_input']}[/dim]\n")
             
             # Ask completion status
-            status = Prompt.ask(
+            status = questionary.select(
                 "Did you finish this?",
-                choices=["yes", "no", "partial"],
-                default="yes"
-            )
+                choices=["Yes", "No", "Partial"],
+                use_arrow_keys=True
+            ).ask()
+            
+            if not status:
+                status = "Yes"
             
             review = {
                 'job_name': job['name'],
@@ -138,14 +145,14 @@ def main():
                 'chat_notes': []
             }
             
-            if status == "yes":
-                quality = Prompt.ask(
+            if status == "Yes":
+                quality = questionary.select(
                     "How did it go?",
-                    choices=["excellent", "good", "okay"],
-                    default="good"
-                )
-                review['quality'] = quality
-            elif status in ["no", "partial"]:
+                    choices=["Excellent", "Good", "Okay"],
+                    use_arrow_keys=True
+                ).ask()
+                review['quality'] = quality if quality else "Good"
+            elif status in ["No", "Partial"]:
                 problem = Prompt.ask("What was the problem?")
                 review['problem'] = problem
             
@@ -156,13 +163,13 @@ def main():
                 review['sub_reviews'] = review_sub_jobs(console, sub_jobs)
             
             # Optional chat about this task review
-            want_chat = Prompt.ask(
-                f"  [yellow]Chat with DeepSeek about '{job['name']}'?[/yellow]",
-                choices=["yes", "no"],
-                default="no"
-            )
+            want_chat = questionary.select(
+                f"Chat with DeepSeek about '{job['name']}'?",
+                choices=["Yes", "No"],
+                use_arrow_keys=True
+            ).ask()
             
-            if want_chat.lower() == "yes":
+            if want_chat == "Yes":
                 console.print("  [dim]Discuss this task. Type 'done' when finished.[/dim]")
                 
                 # Build context for this task
@@ -219,13 +226,13 @@ def main():
             
             # Ask for refinement
             console.print()
-            want_refinement = Prompt.ask(
-                "[yellow]Do you want to refine this summary?[/yellow]",
-                choices=["yes", "no"],
-                default="no"
-            )
+            want_refinement = questionary.select(
+                "Do you want to refine this summary?",
+                choices=["Yes", "No"],
+                use_arrow_keys=True
+            ).ask()
             
-            if want_refinement.lower() != "yes":
+            if want_refinement != "Yes":
                 break
             
             # Get feedback
@@ -349,16 +356,16 @@ def main():
                 
                 # Ask if user is satisfied
                 console.print()
-                satisfied = Prompt.ask(
-                    "[yellow]Is this understanding correct?[/yellow]",
-                    choices=["yes", "no", "refine"],
-                    default="yes"
-                )
+                satisfied = questionary.select(
+                    "Is this understanding correct?",
+                    choices=["Yes", "No", "Refine"],
+                    use_arrow_keys=True
+                ).ask()
                 
-                if satisfied.lower() == "yes":
+                if satisfied == "Yes":
                     console.print("[green]✓ Great! Your feedback has been recorded.[/green]")
                     break
-                elif satisfied.lower() == "refine":
+                elif satisfied == "Refine":
                     refinement = Prompt.ask("[cyan]How would you like to refine your description?[/cyan]")
                     if refinement.strip():
                         user_description = refinement
@@ -378,6 +385,16 @@ def main():
                 'understanding_history': understanding_history,
                 'final_understanding': ai_understanding
             }
+            
+            # Save to central feedback storage
+            feedback_entry = {
+                'date': datetime.now().isoformat(),
+                'original_feedback': tool_feedback,
+                'final_understanding': ai_understanding,
+                'understanding_history': understanding_history,
+                'status': 'pending'
+            }
+            storage.save_feedback(feedback_entry)
         
         # Save log
         log_data = {
@@ -390,23 +407,10 @@ def main():
             'tool_reflection': tool_reflection
         }
         
-        # Add header to markdown
-        date_str = datetime.now().strftime("%Y-%m-%d")
-        markdown_content = f"# Daily Summary - {date_str}\n\n{summary_content}\n\n"
-        
-        if chat_messages:
-            markdown_content += "## Chat History\n\n"
-            for msg in chat_messages:
-                markdown_content += f"**You:** {msg['user']}\n\n"
-                markdown_content += f"**DeepSeek:** {msg['assistant']}\n\n"
-        
-        markdown_content += "---\n*Generated with DeepSeek AI*"
-        
-        storage.save_log(log_data, markdown_content)
+        storage.save_log(log_data)
         
         console.print(f"\n[green]✓ Summary saved successfully![/green]")
-        console.print(f"[dim]JSON: {storage.get_log_path(format='json')}[/dim]")
-        console.print(f"[dim]Markdown: {storage.get_log_path(format='md')}[/dim]")
+        console.print(f"[dim]JSON: {storage.get_log_path()}[/dim]")
         
     except FileNotFoundError as e:
         console.print(f"[red]Error: {e}[/red]")

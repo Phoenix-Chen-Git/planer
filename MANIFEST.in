@@ -1,0 +1,6 @@
+include config.yaml
+include config_example.yaml
+include .env.example
+include README.md
+include LICENSE
+recursive-include lib *.py

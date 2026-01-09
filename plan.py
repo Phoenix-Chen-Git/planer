@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Morning planning script - helps create daily plans with DeepSeek AI."""
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Optional, Dict, List
 
 # Add lib to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -14,6 +15,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
 from rich.prompt import Prompt
+import questionary
 
 
 def collect_sub_jobs(console, parent_name: str, depth: int = 1) -> list:
@@ -31,13 +33,13 @@ def collect_sub_jobs(console, parent_name: str, depth: int = 1) -> list:
     indent = "  " * depth
     
     while True:
-        has_sub = Prompt.ask(
-            f"{indent}[yellow]Add a sub-task for '{parent_name}'?[/yellow]",
-            choices=["yes", "no"],
-            default="no"
-        )
+        has_sub = questionary.select(
+            f"{indent}Add a sub-task for '{parent_name}'?",
+            choices=["Yes", "No"],
+            use_arrow_keys=True
+        ).ask()
         
-        if has_sub.lower() != "yes":
+        if has_sub == "No":
             break
         
         sub_name = Prompt.ask(f"{indent}[cyan]Sub-task name[/cyan]")
@@ -59,6 +61,81 @@ def collect_sub_jobs(console, parent_name: str, depth: int = 1) -> list:
         console.print(f"{indent}[green]✓ Added sub-task: {sub_name}[/green]")
     
     return sub_jobs
+
+
+def get_previous_plan(storage: Storage) -> Optional[Dict]:
+    """Get yesterday's plan if it exists.
+    
+    Args:
+        storage: Storage instance
+        
+    Returns:
+        Yesterday's plan data or None
+    """
+    yesterday = datetime.now() - timedelta(days=1)
+    return storage.load_plan(yesterday)
+
+
+def get_unfinished_tasks(plan_data: Dict) -> List[Dict]:
+    """Extract tasks that weren't completed.
+    
+    Args:
+        plan_data: Plan data dictionary
+        
+    Returns:
+        List of unfinished job dictionaries
+    """
+    completion = plan_data.get('completion_status', {})
+    jobs = plan_data.get('jobs', [])
+    unfinished = []
+    
+    for job in jobs:
+        job_name = job.get('name', '')
+        # Check if task was not completed
+        if not completion.get(job_name, False):
+            unfinished.append(job)
+    
+    return unfinished
+
+
+def select_tasks_to_carry_over(unfinished_tasks: List[Dict], console: Console) -> List[Dict]:
+    """Let user select which tasks to carry over.
+    
+    Args:
+        unfinished_tasks: List of unfinished tasks
+        console: Rich console
+        
+    Returns:
+        List of selected tasks to carry over
+    """
+    if not unfinished_tasks:
+        return []
+    
+    console.print(f"\n[yellow]Found {len(unfinished_tasks)} unfinished task(s) from yesterday:[/yellow]")
+    
+    # Build choices for checkbox selection
+    from questionary import checkbox
+    
+    choices = [task['name'] for task in unfinished_tasks]
+    
+    selected_names = checkbox(
+        "Select tasks to carry over (Space to select, Enter to confirm):",
+        choices=choices
+    ).ask()
+    
+    if not selected_names:
+        return []
+    
+    # Return selected tasks
+    selected_tasks = [task for task in unfinished_tasks if task['name'] in selected_names]
+    
+    # Mark tasks as carried over
+    yesterday_str = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    for task in selected_tasks:
+        task['carried_over_from'] = yesterday_str
+        task['original_user_input'] = task.get('user_input', '')
+    
+    return selected_tasks
 
 
 def main():
@@ -83,12 +160,12 @@ def main():
         # Check if plan already exists
         if storage.plan_exists():
             console.print("\n[yellow]⚠️  A plan already exists for today.[/yellow]")
-            overwrite = Prompt.ask(
+            overwrite = questionary.select(
                 "Do you want to create a new plan?",
-                choices=["yes", "no"],
-                default="no"
-            )
-            if overwrite.lower() != "yes":
+                choices=["Yes", "No"],
+                use_arrow_keys=True
+            ).ask()
+            if overwrite != "Yes":
                 console.print("[dim]Exiting...[/dim]")
                 return
         
@@ -113,8 +190,24 @@ def main():
             api_base=deepseek_config.get('api_base', 'https://api.deepseek.com')
         )
         
+        # Check for previous day's unfinished tasks
+        console.print("\n[yellow]Checking for unfinished tasks from yesterday...[/yellow]")
+        previous_plan = get_previous_plan(storage)
+        carried_over_tasks = []
+        
+        if previous_plan:
+            unfinished_tasks = get_unfinished_tasks(previous_plan)
+            if unfinished_tasks:
+                carried_over_tasks = select_tasks_to_carry_over(unfinished_tasks, console)
+                if carried_over_tasks:
+                    console.print(f"[green]✓ Carrying over {len(carried_over_tasks)} task(s)[/green]\n")
+            else:
+                console.print("[green]✓ All tasks from yesterday were completed![/green]\n")
+        else:
+            console.print("[dim]No plan found for yesterday.[/dim]\n")
+        
         # Collect user inputs
-        console.print("\n[bold green]Let's plan your day![/bold green]")
+        console.print("[bold green]Let's plan your day![/bold green]")
         console.print("[dim]For each category, describe what you want to accomplish.[/dim]\n")
         
         jobs_input = []
@@ -137,13 +230,13 @@ def main():
                 job_data['sub_jobs'] = collect_sub_jobs(console, job['name'])
                 
                 # Optional chat about this job
-                want_chat = Prompt.ask(
-                    f"  [yellow]Chat with DeepSeek about '{job['name']}'?[/yellow]",
-                    choices=["yes", "no"],
-                    default="no"
-                )
+                want_chat = questionary.select(
+                    f"Chat with DeepSeek about '{job['name']}'?",
+                    choices=["Yes", "No"],
+                    use_arrow_keys=True
+                ).ask()
                 
-                if want_chat.lower() == "yes":
+                if want_chat == "Yes":
                     console.print("  [dim]Chat about this job. Type 'done' when finished.[/dim]")
                     chat_history = [
                         {"role": "system", "content": f"You are helping the user plan their '{job['name']}' tasks. They want to do: {user_input}. Help them think through this task, offer suggestions, or answer questions. Be concise and helpful."}
@@ -179,6 +272,11 @@ def main():
             console.print("[yellow]No inputs provided. Exiting...[/yellow]")
             return
         
+        # Add carried-over tasks to jobs_input
+        if carried_over_tasks:
+            console.print(f"\n[cyan]Adding {len(carried_over_tasks)} carried-over task(s) to today's plan...[/cyan]")
+            jobs_input.extend(carried_over_tasks)
+        
         
         # Generate plan
         console.print("[yellow]Generating your daily plan...[/yellow]\n")
@@ -196,13 +294,13 @@ def main():
             
             # Ask for feedback
             console.print()
-            want_refinement = Prompt.ask(
-                "[yellow]Do you want to refine this plan?[/yellow]",
-                choices=["yes", "no"],
-                default="no"
-            )
+            want_refinement = questionary.select(
+                "Do you want to refine this plan?",
+                choices=["Yes", "No"],
+                use_arrow_keys=True
+            ).ask()
             
-            if want_refinement.lower() != "yes":
+            if want_refinement != "Yes":
                 break
             
             # Get feedback
@@ -246,15 +344,10 @@ def main():
             'refinement_history': refinement_history
         }
         
-        # Add header to markdown
-        date_str = datetime.now().strftime("%Y-%m-%d")
-        markdown_content = f"# Daily Plan - {date_str}\n\n{plan_content}\n\n---\n*Generated with DeepSeek AI*"
-        
-        storage.save_plan(plan_data, markdown_content)
+        storage.save_plan(plan_data)
         
         console.print(f"\n[green]✓ Plan saved successfully![/green]")
-        console.print(f"[dim]JSON: {storage.get_plan_path(format='json')}[/dim]")
-        console.print(f"[dim]Markdown: {storage.get_plan_path(format='md')}[/dim]")
+        console.print(f"[dim]JSON: {storage.get_plan_path()}[/dim]")
         
     except FileNotFoundError as e:
         console.print(f"[red]Error: {e}[/red]")

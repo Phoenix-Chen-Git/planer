@@ -147,71 +147,44 @@ def mark_tasks_interactive(plan_data: dict, console: Console) -> dict:
     return plan_data
 
 
-def update_markdown_with_checks(plan_content: str, completion_status: dict, jobs: list) -> str:
-    """Update markdown content to reflect completion status.
+def count_all_tasks(jobs: list) -> int:
+    """Recursively count all tasks including sub-jobs.
     
     Args:
-        plan_content: Original markdown plan content
-        completion_status: Dictionary of job_name -> bool
         jobs: List of job dictionaries
-    
+        
     Returns:
-        Updated markdown content with checked boxes
+        Total number of tasks
     """
-    lines = plan_content.split('\n')
-    
+    count = len(jobs)
     for job in jobs:
-        job_name = job['name']
-        user_input = job.get('user_input', '')
-        is_done = completion_status.get(job_name, False)
-        
-        if not is_done:
-            continue
-            
-        # Try multiple matching strategies
-        job_words = job_name.lower().split()
-        user_words = user_input.lower().split()
-        all_words = job_words + user_words
-        
-        # Strategy 1: Find section header containing job keywords, then mark first checkbox
-        section_start = -1
-        for i, line in enumerate(lines):
-            line_lower = line.lower()
-            
-            # Check if this is a header line
-            if line.strip().startswith('#') or line.strip().startswith('##'):
-                # Check if any significant job words match in header
-                for word in job_words:
-                    if len(word) > 2 and word in line_lower:
-                        section_start = i
-                        break
-        
-        # If we found a matching section, mark the first checkbox after it
-        if section_start >= 0:
-            for i in range(section_start + 1, len(lines)):
-                line = lines[i]
-                # Stop if we hit another header
-                if line.strip().startswith('#'):
-                    break
-                # Mark the first checkbox
-                if '- [ ]' in line:
-                    lines[i] = line.replace('- [ ]', '- [x]', 1)
-                    break
-            continue
-        
-        # Strategy 2: Direct keyword match on any checkbox line
-        for i, line in enumerate(lines):
-            if '- [ ]' in line:
-                line_lower = line.lower()
-                for word in all_words:
-                    if len(word) > 2 and word in line_lower:
-                        lines[i] = line.replace('- [ ]', '- [x]', 1)
-                        break
-                else:
-                    continue
-                break
+        sub_jobs = job.get('sub_jobs', [])
+        if sub_jobs:
+            count += count_all_tasks(sub_jobs)
+    return count
+
+
+def count_completed_tasks(jobs: list, completion_status: dict) -> int:
+    """Recursively count completed tasks including sub-jobs.
     
-    return '\n'.join(lines)
+    Args:
+        jobs: List of job dictionaries
+        completion_status: Dict of job_name -> bool
+        
+    Returns:
+        Number of completed tasks
+    """
+    count = 0
+    for job in jobs:
+        job_name = job.get('name') or job.get('task_name', 'Unknown')
+        if completion_status.get(job_name, False):
+            count += 1
+        
+        sub_jobs = job.get('sub_jobs', [])
+        if sub_jobs:
+            count += count_completed_tasks(sub_jobs, completion_status)
+    
+    return count
 
 
 def display_completion_summary(plan_data: dict, console: Console):
@@ -222,15 +195,18 @@ def display_completion_summary(plan_data: dict, console: Console):
         console: Rich console
     """
     completion = plan_data.get('completion_status', {})
-    total = len(plan_data.get('jobs', []))
-    completed = sum(1 for done in completion.values() if done)
+    jobs = plan_data.get('jobs', [])
+    
+    # Count all tasks including sub-jobs
+    total = count_all_tasks(jobs)
+    completed = count_completed_tasks(jobs, completion)
     
     # Create summary table
     table = Table(title="Completion Summary", show_header=True, header_style="bold green")
     table.add_column("Task", style="cyan")
     table.add_column("Status", justify="center")
     
-    for job in plan_data.get('jobs', []):
+    for job in jobs:
         job_name = job['name']
         is_done = completion.get(job_name, False)
         status = "[green]✓[/green]" if is_done else "[dim]○[/dim]"
@@ -288,16 +264,8 @@ def main():
         # Mark tasks interactively
         plan_data = mark_tasks_interactive(plan_data, console)
         
-        # Update markdown content with checkmarks
-        updated_markdown = update_markdown_with_checks(
-            plan_data.get('plan_content', ''),
-            plan_data.get('completion_status', {}),
-            plan_data.get('jobs', [])
-        )
-        plan_data['plan_content'] = updated_markdown
-        
-        # Save updated plan (both JSON and markdown)
-        storage.save_plan(plan_data, updated_markdown)
+        # Save updated plan
+        storage.save_plan(plan_data)
         
         # Display summary
         display_completion_summary(plan_data, console)
