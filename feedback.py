@@ -18,26 +18,38 @@ import questionary
 from datetime import datetime
 
 
-def display_feedback(storage: Storage, console: Console):
-    """Display all feedback entries in a table.
+def display_feedback(storage: Storage, console: Console, show_archived: bool = False):
+    """Display feedback entries in a table.
     
     Args:
         storage: Storage instance
         console: Rich console
+        show_archived: If True, show archived entries instead of pending
     """
-    feedback_data = storage.load_all_feedback()
-    entries = feedback_data.get('feedback_entries', [])
+    if show_archived:
+        feedback_data = storage.load_archived_feedback()
+        entries = feedback_data.get('archived_entries', [])
+        title = "Archived Feedback (Implemented/Dismissed)"
+    else:
+        feedback_data = storage.load_all_feedback()
+        entries = feedback_data.get('feedback_entries', [])
+        # Filter to only pending
+        entries = [e for e in entries if e.get('status', 'pending') == 'pending']
+        title = "Pending Feedback"
     
     if not entries:
-        console.print("[yellow]No feedback entries found.[/yellow]")
-        console.print("[dim]Run summarize.py and provide feedback to add entries.[/dim]")
-        return
+        if show_archived:
+            console.print("[yellow]No archived feedback entries.[/yellow]")
+        else:
+            console.print("[green]✓ No pending feedback! All clear.[/green]")
+        return entries
     
     # Create summary table
-    table = Table(title="Tool Improvement Feedback", show_header=True, header_style="bold cyan")
+    table = Table(title=title, show_header=True, header_style="bold cyan")
     table.add_column("#", style="dim", width=3)
     table.add_column("Date", style="cyan", width=12)
-    table.add_column("Status", justify="center", width=12)
+    if show_archived:
+        table.add_column("Status", justify="center", width=12)
     table.add_column("Feedback", style="white", width=50)
     
     for i, entry in enumerate(entries):
@@ -48,23 +60,26 @@ def display_feedback(storage: Storage, console: Console):
         except:
             date_display = date_str[:10]
         
-        status = entry.get('status', 'pending')
-        status_style = {
-            'pending': '[yellow]Pending[/yellow]',
-            'implemented': '[green]✓ Done[/green]',
-            'dismissed': '[dim]Dismissed[/dim]'
-        }.get(status, status)
-        
         original = entry.get('original_feedback', 'N/A')
         # Truncate if too long
         if len(original) > 47:
             original = original[:44] + "..."
         
-        table.add_row(str(i), date_display, status_style, original)
+        if show_archived:
+            status = entry.get('status', 'pending')
+            status_style = {
+                'implemented': '[green]✓ Done[/green]',
+                'dismissed': '[dim]Dismissed[/dim]'
+            }.get(status, status)
+            table.add_row(str(i), date_display, status_style, original)
+        else:
+            table.add_row(str(i), date_display, original)
     
     console.print("\n")
     console.print(table)
-    console.print(f"\n[dim]Total: {len(entries)} feedback entries[/dim]")
+    console.print(f"\n[dim]Total: {len(entries)} entries[/dim]")
+    
+    return entries
 
 
 def show_feedback_detail(entry: dict, index: int, console: Console):
@@ -116,8 +131,19 @@ def add_new_feedback(storage: Storage, console: Console):
         storage: Storage instance
         console: Rich console
     """
-    console.print("\n[bold cyan]Add Tool Improvement Feedback[/bold cyan]\n")
-    console.print("[dim]Share your ideas for improving this tool.[/dim]\n")
+    # Check pending feedback limit
+    pending_count = storage.count_pending_feedback()
+    MAX_PENDING = 10
+    
+    if pending_count >= MAX_PENDING:
+        console.print(f"\n[red]✗ Cannot add feedback: You have {pending_count} pending items![/red]")
+        console.print(f"[yellow]Please resolve some pending feedback before adding new ones.[/yellow]")
+        console.print("[dim]Mark items as 'Implemented' or 'Dismissed' to archive them.[/dim]\n")
+        return
+    
+    remaining = MAX_PENDING - pending_count
+    console.print(f"\n[bold cyan]Add Tool Improvement Feedback[/bold cyan]")
+    console.print(f"[dim]({remaining} slots remaining out of {MAX_PENDING})[/dim]\n")
     
     # Get initial feedback
     tool_feedback = Prompt.ask("[yellow]What would you like to improve about this tool?[/yellow]")
@@ -231,17 +257,28 @@ def interactive_menu(storage: Storage, console: Console):
         storage: Storage instance
         console: Rich console
     """
+    show_archived = False
+    
     while True:
-        # Display current feedback
+        # Display current feedback based on mode
         console.print("\n")
-        display_feedback(storage, console)
+        entries = display_feedback(storage, console, show_archived=show_archived)
         
-        # Load feedback data
-        feedback_data = storage.load_all_feedback()
-        entries = feedback_data.get('feedback_entries', [])
+        # Show pending count limit
+        if not show_archived:
+            pending_count = storage.count_pending_feedback()
+            console.print(f"[dim]Pending: {pending_count}/10 slots used[/dim]")
         
         # Build menu choices
-        choices = ["Add new feedback", "─" * 40]
+        choices = []
+        
+        if show_archived:
+            choices.append("← Back to pending")
+        else:
+            choices.append("Add new feedback")
+            choices.append("📁 View archived")
+        
+        choices.append("─" * 40)
         
         if entries:
             # Add view options for each entry
@@ -249,12 +286,16 @@ def interactive_menu(storage: Storage, console: Console):
                 feedback_preview = entry.get('original_feedback', 'N/A')
                 if len(feedback_preview) > 50:
                     feedback_preview = feedback_preview[:47] + "..."
-                status = entry.get('status', 'pending')
-                status_emoji = {'pending': '○', 'implemented': '✓', 'dismissed': '✕'}.get(status, '○')
-                choices.append(f"[{i}] {status_emoji} {feedback_preview}")
+                if show_archived:
+                    status = entry.get('status', 'pending')
+                    status_emoji = {'implemented': '✓', 'dismissed': '✕'}.get(status, '○')
+                    choices.append(f"[{i}] {status_emoji} {feedback_preview}")
+                else:
+                    choices.append(f"[{i}] ○ {feedback_preview}")
             
-            choices.append("─" * 40)
-            choices.append("Mark feedback status")
+            if not show_archived:
+                choices.append("─" * 40)
+                choices.append("Mark as done (archive)")
         
         choices.append("Exit")
         
@@ -270,25 +311,39 @@ def interactive_menu(storage: Storage, console: Console):
             console.print("\n[green]Goodbye![/green]\n")
             break
         
+        elif choice == "← Back to pending":
+            show_archived = False
+            continue
+        
+        elif choice == "📁 View archived":
+            show_archived = True
+            continue
+        
         elif choice == "Add new feedback":
             add_new_feedback(storage, console)
             continue
         
-        elif choice == "Mark feedback status":
+        elif choice == "Mark as done (archive)":
             if not entries:
-                console.print("[yellow]No feedback entries to mark.[/yellow]")
+                console.print("[yellow]No pending feedback to mark.[/yellow]")
                 continue
+            
+            # Get all pending entries with their original indices
+            feedback_data = storage.load_all_feedback()
+            all_entries = feedback_data.get('feedback_entries', [])
+            pending_with_indices = [(i, e) for i, e in enumerate(all_entries) 
+                                    if e.get('status', 'pending') == 'pending']
             
             # Select which entry to mark
             entry_choices = []
-            for i, entry in enumerate(entries):
+            for orig_idx, entry in pending_with_indices:
                 feedback_preview = entry.get('original_feedback', 'N/A')
                 if len(feedback_preview) > 50:
                     feedback_preview = feedback_preview[:47] + "..."
-                entry_choices.append(f"[{i}] {feedback_preview}")
+                entry_choices.append(f"[{orig_idx}] {feedback_preview}")
             
             entry_choice = questionary.select(
-                "Which feedback entry?",
+                "Which feedback to mark as done?",
                 choices=entry_choices,
                 use_arrow_keys=True
             ).ask()
@@ -296,24 +351,25 @@ def interactive_menu(storage: Storage, console: Console):
             if not entry_choice:
                 continue
             
-            # Extract index
+            # Extract original index
             index = int(entry_choice.split(']')[0][1:])
             
-            # Select status
+            # Select status (only implemented or dismissed, as those archive)
             status_choice = questionary.select(
-                "New status:",
-                choices=["Implemented", "Pending", "Dismissed"],
+                "Mark as:",
+                choices=["✓ Implemented (archive)", "✕ Dismissed (archive)", "Cancel"],
                 use_arrow_keys=True
             ).ask()
             
-            if status_choice:
-                status_map = {
-                    'Implemented': 'implemented',
-                    'Pending': 'pending',
-                    'Dismissed': 'dismissed'
-                }
-                storage.update_feedback_status(index, status_map[status_choice])
-                console.print(f"[green]✓ Updated entry #{index} to '{status_map[status_choice]}'[/green]")
+            if status_choice and status_choice != "Cancel":
+                if "Implemented" in status_choice:
+                    storage.update_feedback_status(index, 'implemented')
+                    storage.archive_feedback(index)
+                    console.print(f"[green]✓ Feedback #{index} marked as implemented and archived![/green]")
+                elif "Dismissed" in status_choice:
+                    storage.update_feedback_status(index, 'dismissed')
+                    storage.archive_feedback(index)
+                    console.print(f"[yellow]✕ Feedback #{index} dismissed and archived.[/yellow]")
         
         elif choice.startswith("["):
             # User selected a specific feedback entry to view

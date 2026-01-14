@@ -71,7 +71,7 @@ def build_task_tree(jobs: list, completion_status: dict, depth: int = 0) -> list
     
     Args:
         jobs: List of job dictionaries
-        completion_status: Dict of job_name -> bool
+        completion_status: Dict of job_name -> status ('done', 'quit', or None/pending)
         depth: Current depth level
     
     Returns:
@@ -82,8 +82,15 @@ def build_task_tree(jobs: list, completion_status: dict, depth: int = 0) -> list
     
     for job in jobs:
         job_name = job.get('name') or job.get('task_name', 'Unknown')
-        is_done = completion_status.get(job_name, False)
-        checkbox = "[✓]" if is_done else "[ ]"
+        status = completion_status.get(job_name)
+        
+        # Three states: pending [ ], done [✓], quit [✗]
+        if status == 'done' or status is True:  # Support legacy bool format
+            checkbox = "[✓]"
+        elif status == 'quit':
+            checkbox = "[✗]"
+        else:
+            checkbox = "[ ]"
         
         choice_text = f"{indent}{checkbox} {job_name}"
         choices.append(Choice(choice_text, value=job_name))
@@ -117,11 +124,11 @@ def mark_tasks_interactive(plan_data: dict, console: Console) -> dict:
         # Build task tree
         choices = build_task_tree(jobs, completion)
         choices.append(Choice("─" * 40, disabled=True))
-        choices.append(Choice("✓ Done - Save and exit", value="__EXIT__"))
+        choices.append(Choice("💾 Save and exit", value="__EXIT__"))
         
         # Show menu
-        console.print("\n[bold green]Use arrow keys to navigate, Space/Enter to toggle[/bold green]")
-        console.print("[dim]Scroll through tasks and press Enter to mark as done/undone[/dim]")
+        console.print("\n[bold green]Use arrow keys to navigate, Enter to cycle status[/bold green]")
+        console.print("[dim]States: [ ] pending → [✓] done → [✗] quit → [ ] pending[/dim]")
         
         selected = questionary.select(
             "Select a task to toggle:",
@@ -132,14 +139,24 @@ def mark_tasks_interactive(plan_data: dict, console: Console) -> dict:
         if selected == "__EXIT__" or selected is None:
             break
         
-        # Toggle completion status
-        if selected in completion:
-            completion[selected] = not completion[selected]
-            status = "done" if completion[selected] else "undone"
-            console.print(f"[yellow]'{selected}' marked as {status}[/yellow]")
-        else:
-            completion[selected] = True
-            console.print(f"[green]'{selected}' marked as done[/green]")
+        # Cycle through three states: pending -> done -> quit -> pending
+        current_status = completion.get(selected)
+        
+        # Handle legacy boolean format
+        if current_status is True:
+            current_status = 'done'
+        elif current_status is False:
+            current_status = None
+        
+        if current_status is None:
+            completion[selected] = 'done'
+            console.print(f"[green]'{selected}' marked as done ✓[/green]")
+        elif current_status == 'done':
+            completion[selected] = 'quit'
+            console.print(f"[red]'{selected}' marked as quit ✗[/red]")
+        else:  # quit -> pending
+            completion[selected] = None
+            console.print(f"[yellow]'{selected}' marked as pending[/yellow]")
     
     plan_data['completion_status'] = completion
     plan_data['last_checked'] = datetime.now().isoformat()
@@ -169,7 +186,7 @@ def count_completed_tasks(jobs: list, completion_status: dict) -> int:
     
     Args:
         jobs: List of job dictionaries
-        completion_status: Dict of job_name -> bool
+        completion_status: Dict of job_name -> status ('done', 'quit', or None)
         
     Returns:
         Number of completed tasks
@@ -177,12 +194,37 @@ def count_completed_tasks(jobs: list, completion_status: dict) -> int:
     count = 0
     for job in jobs:
         job_name = job.get('name') or job.get('task_name', 'Unknown')
-        if completion_status.get(job_name, False):
+        status = completion_status.get(job_name)
+        # Count 'done' tasks (support legacy bool format)
+        if status == 'done' or status is True:
             count += 1
         
         sub_jobs = job.get('sub_jobs', [])
         if sub_jobs:
             count += count_completed_tasks(sub_jobs, completion_status)
+    
+    return count
+
+
+def count_quit_tasks(jobs: list, completion_status: dict) -> int:
+    """Recursively count quit tasks including sub-jobs.
+    
+    Args:
+        jobs: List of job dictionaries
+        completion_status: Dict of job_name -> status ('done', 'quit', or None)
+        
+    Returns:
+        Number of quit tasks
+    """
+    count = 0
+    for job in jobs:
+        job_name = job.get('name') or job.get('task_name', 'Unknown')
+        if completion_status.get(job_name) == 'quit':
+            count += 1
+        
+        sub_jobs = job.get('sub_jobs', [])
+        if sub_jobs:
+            count += count_quit_tasks(sub_jobs, completion_status)
     
     return count
 
@@ -200,6 +242,7 @@ def display_completion_summary(plan_data: dict, console: Console):
     # Count all tasks including sub-jobs
     total = count_all_tasks(jobs)
     completed = count_completed_tasks(jobs, completion)
+    quit_count = count_quit_tasks(jobs, completion)
     
     # Create summary table
     table = Table(title="Completion Summary", show_header=True, header_style="bold green")
@@ -208,13 +251,49 @@ def display_completion_summary(plan_data: dict, console: Console):
     
     for job in jobs:
         job_name = job['name']
-        is_done = completion.get(job_name, False)
-        status = "[green]✓[/green]" if is_done else "[dim]○[/dim]"
+        status_val = completion.get(job_name)
+        # Handle legacy bool format
+        if status_val == 'done' or status_val is True:
+            status = "[green]✓[/green]"
+        elif status_val == 'quit':
+            status = "[red]✗[/red]"
+        else:
+            status = "[dim]○[/dim]"
         table.add_row(job_name, status)
     
     console.print("\n")
     console.print(table)
-    console.print(f"\n[bold]Progress:[/bold] {completed}/{total} tasks completed ({completed*100//total if total > 0 else 0}%)")
+    
+    # Calculate percentage based on resolved tasks (done + quit) vs total
+    resolved = completed + quit_count
+    percentage = completed * 100 // total if total > 0 else 0
+    
+    # Create visual progress bar with three sections
+    bar_width = 30
+    done_width = int(bar_width * completed / total) if total > 0 else 0
+    quit_width = int(bar_width * quit_count / total) if total > 0 else 0
+    pending_width = bar_width - done_width - quit_width
+    
+    # Color based on progress (completed tasks only)
+    if percentage >= 80:
+        bar_color = "green"
+        emoji = "🎉"
+    elif percentage >= 50:
+        bar_color = "yellow"
+        emoji = "💪"
+    elif percentage >= 20:
+        bar_color = "orange1"
+        emoji = "🚀"
+    else:
+        bar_color = "cyan"
+        emoji = "📋"
+    
+    progress_bar = f"[{bar_color}]{'█' * done_width}[/{bar_color}][red]{'█' * quit_width}[/red][dim]{'░' * pending_width}[/dim]"
+    
+    # Show stats
+    pending = total - completed - quit_count
+    stats = f"✓{completed} ✗{quit_count} ○{pending}"
+    console.print(f"\n[bold]Progress:[/bold] {progress_bar} {stats} ({percentage}% done) {emoji}")
 
 
 def main():

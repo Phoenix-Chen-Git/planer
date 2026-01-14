@@ -176,3 +176,86 @@ class Storage:
             feedback_path = self.get_feedback_path()
             with open(feedback_path, 'w', encoding='utf-8') as f:
                 json.dump(feedback_data, f, indent=2, ensure_ascii=False)
+    
+    def get_improves_path(self) -> Path:
+        """Get path for archived/implemented feedback directory.
+        
+        Returns:
+            Path to improves directory
+        """
+        improves_dir = self.data_dir / "improves"
+        improves_dir.mkdir(exist_ok=True)
+        return improves_dir
+    
+    def get_archived_feedback_path(self) -> Path:
+        """Get path for archived feedback file.
+        
+        Returns:
+            Path to archived_feedback.json
+        """
+        return self.get_improves_path() / "archived_feedback.json"
+    
+    def archive_feedback(self, index: int) -> bool:
+        """Archive a feedback entry (move to improves directory).
+        
+        Args:
+            index: Index of feedback entry to archive
+            
+        Returns:
+            True if successful
+        """
+        feedback_data = self.load_all_feedback()
+        entries = feedback_data.get('feedback_entries', [])
+        
+        if not (0 <= index < len(entries)):
+            return False
+        
+        # Get entry to archive
+        entry = entries.pop(index)
+        entry['archived_date'] = datetime.now().isoformat()
+        
+        # Load or create archived file
+        archived_path = self.get_archived_feedback_path()
+        if archived_path.exists():
+            with open(archived_path, 'r', encoding='utf-8') as f:
+                archived_data = json.load(f)
+        else:
+            archived_data = {'archived_entries': []}
+        
+        # Add to archive
+        archived_data['archived_entries'].append(entry)
+        
+        # Save archived
+        with open(archived_path, 'w', encoding='utf-8') as f:
+            json.dump(archived_data, f, indent=2, ensure_ascii=False)
+        
+        # Save updated feedback (without archived entry)
+        feedback_path = self.get_feedback_path()
+        with open(feedback_path, 'w', encoding='utf-8') as f:
+            json.dump(feedback_data, f, indent=2, ensure_ascii=False)
+        
+        return True
+    
+    def load_archived_feedback(self) -> Dict[str, Any]:
+        """Load all archived feedback entries.
+        
+        Returns:
+            Dictionary containing archived entries
+        """
+        archived_path = self.get_archived_feedback_path()
+        
+        if not archived_path.exists():
+            return {'archived_entries': []}
+        
+        with open(archived_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    
+    def count_pending_feedback(self) -> int:
+        """Count number of pending feedback entries.
+        
+        Returns:
+            Number of pending feedback entries
+        """
+        feedback_data = self.load_all_feedback()
+        entries = feedback_data.get('feedback_entries', [])
+        return sum(1 for e in entries if e.get('status', 'pending') == 'pending')
