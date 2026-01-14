@@ -17,53 +17,150 @@ import questionary
 from questionary import Choice
 
 
-def get_available_plans(storage: Storage) -> list:
-    """Get list of available plan dates.
+def get_plans_hierarchy(storage: Storage) -> dict:
+    """Get plans organized by year/month/week hierarchy.
     
     Returns:
-        List of tuples (date_str, plan_path)
+        Nested dict: {year: {month: {week: [(date_str, plan_path), ...]}}}
     """
     data_dir = storage.data_dir
-    plan_files = sorted(data_dir.glob("*-plan.json"), reverse=True)
     
-    plans = []
-    for plan_file in plan_files:
-        date_str = plan_file.stem.replace("-plan", "")
-        plans.append((date_str, plan_file))
+    # Find all plan files (both old flat structure and new hierarchy)
+    plan_files = list(data_dir.glob("*-plan.json"))  # Old flat
+    plan_files.extend(data_dir.glob("**/*-plan.json"))  # New hierarchy
     
-    return plans
+    # Remove duplicates and organize
+    hierarchy = {}
+    seen = set()
+    
+    for plan_file in sorted(plan_files, reverse=True):
+        # Skip non-date plans (year-plan, month-plan, week-plan)
+        stem = plan_file.stem
+        if stem in ['year-plan', 'month-plan', 'week-plan']:
+            continue
+            
+        date_str = stem.replace("-plan", "")
+        
+        # Skip if already seen
+        if date_str in seen:
+            continue
+        seen.add(date_str)
+        
+        try:
+            date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+            year = date_obj.year
+            month = date_obj.month
+            iso_year, week, _ = date_obj.isocalendar()
+            
+            if year not in hierarchy:
+                hierarchy[year] = {}
+            if month not in hierarchy[year]:
+                hierarchy[year][month] = {}
+            if week not in hierarchy[year][month]:
+                hierarchy[year][month][week] = []
+            
+            hierarchy[year][month][week].append((date_str, plan_file))
+        except:
+            continue
+    
+    return hierarchy
 
 
-def display_plan_selection(plans: list, console: Console) -> str:
-    """Display available plans and let user select one.
+def display_plan_selection_hierarchical(storage: Storage, console: Console) -> str:
+    """Navigate through hierarchy to select a plan.
     
     Args:
-        plans: List of (date_str, plan_path) tuples
+        storage: Storage instance
         console: Rich console
     
     Returns:
-        Selected date string
+        Selected date string or None
     """
-    if not plans:
-        console.print("[red]No plans found in data directory.[/red]")
+    hierarchy = get_plans_hierarchy(storage)
+    
+    if not hierarchy:
+        console.print("[red]No plans found.[/red]")
         return None
     
-    # Create choices
-    choices = []
-    for date_str, _ in plans:
+    # Step 1: Select Year
+    years = sorted(hierarchy.keys(), reverse=True)
+    
+    if len(years) == 1:
+        selected_year = years[0]
+    else:
+        year_choices = [Choice(f"📅 {y}", value=y) for y in years]
+        year_choices.append(Choice("← Cancel", value=None))
+        
+        selected_year = questionary.select(
+            "Select year:",
+            choices=year_choices
+        ).ask()
+        
+        if not selected_year:
+            return None
+    
+    # Step 2: Select Month
+    months = sorted(hierarchy[selected_year].keys(), reverse=True)
+    month_names = {1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "May", 6: "Jun",
+                   7: "Jul", 8: "Aug", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec"}
+    
+    if len(months) == 1:
+        selected_month = months[0]
+    else:
+        month_choices = [Choice(f"📆 {month_names[m]} {selected_year}", value=m) for m in months]
+        month_choices.append(Choice("← Back", value=None))
+        
+        selected_month = questionary.select(
+            "Select month:",
+            choices=month_choices
+        ).ask()
+        
+        if not selected_month:
+            return display_plan_selection_hierarchical(storage, console)  # Go back
+    
+    # Step 3: Select Week
+    weeks = sorted(hierarchy[selected_year][selected_month].keys(), reverse=True)
+    
+    if len(weeks) == 1:
+        selected_week = weeks[0]
+    else:
+        week_choices = [Choice(f"📋 Week {w}", value=w) for w in weeks]
+        week_choices.append(Choice("← Back", value=None))
+        
+        selected_week = questionary.select(
+            "Select week:",
+            choices=week_choices
+        ).ask()
+        
+        if not selected_week:
+            return display_plan_selection_hierarchical(storage, console)
+    
+    # Step 4: Select Day
+    days = hierarchy[selected_year][selected_month][selected_week]
+    
+    if len(days) == 1:
+        return days[0][0]  # Return the date string
+    
+    day_choices = []
+    for date_str, _ in sorted(days, reverse=True):
         try:
             date_obj = datetime.strptime(date_str, "%Y-%m-%d")
-            day_name = date_obj.strftime("%A")
-            choices.append(Choice(f"{date_str} ({day_name})", value=date_str))
+            day_name = date_obj.strftime("%A, %b %d")
+            day_choices.append(Choice(f"📄 {day_name}", value=date_str))
         except:
-            choices.append(Choice(date_str, value=date_str))
+            day_choices.append(Choice(date_str, value=date_str))
     
-    result = questionary.select(
-        "Select a plan:",
-        choices=choices
+    day_choices.append(Choice("← Back", value=None))
+    
+    selected_day = questionary.select(
+        "Select day:",
+        choices=day_choices
     ).ask()
     
-    return result
+    if not selected_day:
+        return display_plan_selection_hierarchical(storage, console)
+    
+    return selected_day
 
 
 def build_task_tree(jobs: list, completion_status: dict, depth: int = 0) -> list:
@@ -303,7 +400,7 @@ def main():
     # Print header
     console.print(Panel.fit(
         f"[bold green]Task Checker[/bold green]\n"
-        f"[dim]Mark tasks as done with arrow keys[/dim]",
+        f"[dim]Navigate: Year → Month → Week → Day[/dim]",
         border_style="green"
     ))
     
@@ -311,16 +408,9 @@ def main():
         # Initialize storage
         storage = Storage()
         
-        # Get available plans
-        plans = get_available_plans(storage)
-        
-        if not plans:
-            console.print("\n[yellow]No plans found. Create a plan first with plan.py[/yellow]")
-            return
-        
-        # Select plan
+        # Select plan using hierarchical navigation
         console.print()
-        selected_date = display_plan_selection(plans, console)
+        selected_date = display_plan_selection_hierarchical(storage, console)
         
         if not selected_date:
             return

@@ -1,7 +1,7 @@
 """Data storage utilities for daily plans and logs."""
 import json
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 
 
@@ -259,3 +259,98 @@ class Storage:
         feedback_data = self.load_all_feedback()
         entries = feedback_data.get('feedback_entries', [])
         return sum(1 for e in entries if e.get('status', 'pending') == 'pending')
+    
+    def get_today_stats(self) -> Dict[str, int]:
+        """Get task completion stats for today.
+        
+        Returns:
+            Dict with 'completed', 'quit', 'pending', 'total' counts
+        """
+        plan = self.load_plan()
+        if not plan:
+            return {'completed': 0, 'quit': 0, 'pending': 0, 'total': 0}
+        
+        completion = plan.get('completion_status', {})
+        jobs = plan.get('jobs', [])
+        
+        # Count tasks recursively
+        def count_tasks(job_list):
+            completed = quit_count = pending = 0
+            for job in job_list:
+                job_name = job.get('name') or job.get('task_name', 'Unknown')
+                status = completion.get(job_name)
+                
+                if status == 'done' or status is True:
+                    completed += 1
+                elif status == 'quit':
+                    quit_count += 1
+                else:
+                    pending += 1
+                
+                # Count sub-jobs
+                sub_jobs = job.get('sub_jobs', [])
+                if sub_jobs:
+                    sub_stats = count_tasks(sub_jobs)
+                    completed += sub_stats[0]
+                    quit_count += sub_stats[1]
+                    pending += sub_stats[2]
+            
+            return completed, quit_count, pending
+        
+        completed, quit_count, pending = count_tasks(jobs)
+        total = completed + quit_count + pending
+        
+        return {
+            'completed': completed,
+            'quit': quit_count,
+            'pending': pending,
+            'total': total
+        }
+    
+    def calculate_streak(self) -> int:
+        """Calculate consecutive days with at least one completed task.
+        
+        Returns:
+            Number of consecutive days (streak)
+        """
+        streak = 0
+        current_date = datetime.now()
+        
+        # Check each day going backwards
+        while True:
+            plan = self.load_plan(current_date)
+            
+            if not plan:
+                # No plan for this day, streak broken
+                break
+            
+            completion = plan.get('completion_status', {})
+            
+            # Check if any task was completed (done or quit counts as resolved)
+            has_completed = any(
+                status == 'done' or status is True
+                for status in completion.values()
+            )
+            
+            if has_completed:
+                streak += 1
+                current_date -= timedelta(days=1)
+            else:
+                # No completed tasks this day
+                break
+        
+        return streak
+    
+    def get_available_plan_dates(self) -> list:
+        """Get list of all available plan dates.
+        
+        Returns:
+            List of date strings (YYYY-MM-DD format), sorted descending
+        """
+        plan_files = sorted(self.data_dir.glob("*-plan.json"), reverse=True)
+        dates = []
+        for f in plan_files:
+            date_str = f.stem.replace("-plan", "")
+            dates.append(date_str)
+        return dates
+

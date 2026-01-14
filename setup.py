@@ -15,7 +15,7 @@ setup(
     author="Phoenix Chen",
     url="https://github.com/Phoenix-Chen-Git/planer",
     packages=find_packages(),
-    py_modules=['daily', 'plan', 'check', 'summarize', 'feedback'],
+    py_modules=['daily', 'plan', 'check', 'summarize', 'feedback', 'hierarchy'],
     install_requires=[
         "openai>=1.0.0",
         "rich>=13.0.0",
@@ -31,6 +31,7 @@ setup(
             'daily-check=check:main',
             'daily-summarize=summarize:main',
             'daily-feedback=feedback:main',
+            'daily-hierarchy=hierarchy:main',
         ],
     },
     classifiers=[
