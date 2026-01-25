@@ -161,52 +161,7 @@ def main():
             if sub_jobs:
                 console.print("[dim]Reviewing sub-tasks:[/dim]")
                 review['sub_reviews'] = review_sub_jobs(console, sub_jobs)
-            
-            # Optional chat about this task review
-            want_chat = questionary.select(
-                f"Chat with DeepSeek about '{job['name']}'?",
-                choices=["Yes", "No"],
-                use_arrow_keys=True
-            ).ask()
-            
-            if want_chat == "Yes":
-                console.print("  [dim]Discuss this task. Type 'done' when finished.[/dim]")
-                
-                # Build context for this task
-                task_context = f"The user planned to work on '{job['name']}: {job['user_input']}'. "
-                task_context += f"They reported status: {status}"
-                if status == "yes":
-                    task_context += f", quality: {review.get('quality', 'N/A')}"
-                elif status in ["no", "partial"]:
-                    task_context += f", problem: {review.get('problem', 'N/A')}"
-                task_context += ". Help them reflect on this task, understand what went well or wrong, or plan improvements."
-                
-                chat_history = [
-                    {"role": "system", "content": task_context}
-                ]
-                
-                while True:
-                    user_msg = Prompt.ask("  [cyan]You[/cyan]")
-                    
-                    if user_msg.lower() in ['done', 'exit', 'quit', 'q']:
-                        console.print("  [dim]Ending chat for this task...[/dim]")
-                        break
-                    
-                    if not user_msg.strip():
-                        continue
-                    
-                    response, chat_history = client.chat(user_msg, chat_history)
-                    review['chat_notes'].append({
-                        'user': user_msg,
-                        'assistant': response
-                    })
-                    
-                    console.print(Panel(
-                        Markdown(response),
-                        title="  [bold magenta]DeepSeek[/bold magenta]",
-                        border_style="magenta"
-                    ))
-            
+
             review_data.append(review)
             console.print()
         

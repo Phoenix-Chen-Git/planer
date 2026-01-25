@@ -8,12 +8,32 @@ from dotenv import load_dotenv
 class ConfigLoader:
     """Handles loading and accessing configuration from config.yaml and .env files."""
     
-    def __init__(self, config_path: str = "config.yaml"):
+    def __init__(self, config_path: str = None):
         """Initialize the config loader.
-        
+
         Args:
             config_path: Path to the YAML configuration file
         """
+        if config_path is None:
+            # Try user config directory first
+            home = Path.home()
+            user_config = home / ".daily_planner" / "config.yaml"
+
+            if user_config.exists():
+                config_path = user_config
+            else:
+                # Fallback to package directory
+                config_path = Path(__file__).parent.parent / "config.yaml"
+
+                # Copy default config to user directory on first run
+                if not user_config.parent.exists():
+                    user_config.parent.mkdir(parents=True, exist_ok=True)
+                if not user_config.exists() and Path(config_path).exists():
+                    import shutil
+                    print(f"📋 Copying default config to {user_config}")
+                    shutil.copy(config_path, user_config)
+                    config_path = user_config
+
         self.config_path = Path(config_path)
         self.config = None
         self._load_env()
@@ -21,12 +41,21 @@ class ConfigLoader:
     
     def _load_env(self):
         """Load environment variables from .env file."""
+        home = Path.home()
+        user_env = home / ".daily_planner" / ".env"
+
+        # Try user directory first
+        if user_env.exists():
+            load_dotenv(user_env)
+            return
+
+        # Fallback to package directory
         env_path = Path(__file__).parent.parent / ".env"
         if env_path.exists():
             load_dotenv(env_path)
         else:
-            print(f"⚠️  Warning: .env file not found at {env_path}")
-            print("   Copy .env.example to .env and add your DeepSeek API key")
+            print(f"⚠️  Warning: .env file not found")
+            print(f"   Create {user_env} or {env_path} with your DeepSeek API key")
     
     def _load_config(self):
         """Load configuration from YAML file."""
@@ -78,12 +107,12 @@ class ConfigLoader:
         return self.config.get('preferences', {})
 
 
-def load_config(config_path: str = "config.yaml") -> ConfigLoader:
+def load_config(config_path: str = None) -> ConfigLoader:
     """Convenience function to load configuration.
-    
+
     Args:
         config_path: Path to the YAML configuration file
-    
+
     Returns:
         ConfigLoader instance
     """

@@ -24,9 +24,12 @@ from questionary import Choice
 class HierarchyStorage:
     """Extended storage for hierarchical plans (Year/Month/Week)."""
     
-    def __init__(self, data_dir: str = "data"):
+    def __init__(self, data_dir: str = None):
+        if data_dir is None:
+            home = Path.home()
+            data_dir = home / ".daily_planner" / "data"
         self.data_dir = Path(data_dir)
-        self.data_dir.mkdir(exist_ok=True)
+        self.data_dir.mkdir(parents=True, exist_ok=True)
     
     def _get_week_number(self, date: Optional[datetime] = None) -> tuple:
         """Get ISO week number and year for a date.

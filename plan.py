@@ -228,42 +228,7 @@ def main():
                 
                 # Collect sub-jobs recursively
                 job_data['sub_jobs'] = collect_sub_jobs(console, job['name'])
-                
-                # Optional chat about this job
-                want_chat = questionary.select(
-                    f"Chat with DeepSeek about '{job['name']}'?",
-                    choices=["Yes", "No"],
-                    use_arrow_keys=True
-                ).ask()
-                
-                if want_chat == "Yes":
-                    console.print("  [dim]Chat about this job. Type 'done' when finished.[/dim]")
-                    chat_history = [
-                        {"role": "system", "content": f"You are helping the user plan their '{job['name']}' tasks. They want to do: {user_input}. Help them think through this task, offer suggestions, or answer questions. Be concise and helpful."}
-                    ]
-                    
-                    while True:
-                        user_msg = Prompt.ask("  [cyan]You[/cyan]")
-                        
-                        if user_msg.lower() in ['done', 'exit', 'quit', 'q']:
-                            console.print("  [dim]Ending chat for this job...[/dim]")
-                            break
-                        
-                        if not user_msg.strip():
-                            continue
-                        
-                        response, chat_history = client.chat(user_msg, chat_history)
-                        job_data['chat_notes'].append({
-                            'user': user_msg,
-                            'assistant': response
-                        })
-                        
-                        console.print(Panel(
-                            Markdown(response),
-                            title="  [bold magenta]DeepSeek[/bold magenta]",
-                            border_style="magenta"
-                        ))
-                
+
                 jobs_input.append(job_data)
             
             console.print()

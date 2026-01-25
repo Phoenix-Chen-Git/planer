@@ -2,20 +2,52 @@
 import json
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+
+
+def migrate_to_user_directory():
+    """Migrate data from project directory to user directory on first run."""
+    home = Path.home()
+    user_data_dir = home / ".daily_planner" / "data"
+
+    # If user directory already exists, no migration needed
+    if user_data_dir.exists():
+        return
+
+    # Find project directory (where this script is located)
+    project_dir = Path(__file__).parent.parent / "data"
+
+    if not project_dir.exists():
+        # No data to migrate, create fresh directory
+        user_data_dir.mkdir(parents=True, exist_ok=True)
+        return
+
+    # Copy entire data directory
+    import shutil
+    print(f"📦 Migrating data from {project_dir} to {user_data_dir}...")
+    shutil.copytree(project_dir, user_data_dir)
+    print(f"✅ Migration complete!")
 
 
 class Storage:
     """Handles saving and loading daily plans and logs."""
     
-    def __init__(self, data_dir: str = "data"):
+    def __init__(self, data_dir: str = None):
         """Initialize storage.
-        
+
         Args:
-            data_dir: Directory to store data files
+            data_dir: Directory to store data files (defaults to ~/.daily_planner/data)
         """
+        if data_dir is None:
+            # Use user's home directory
+            home = Path.home()
+            data_dir = home / ".daily_planner" / "data"
+
+            # Migrate data on first run
+            migrate_to_user_directory()
+
         self.data_dir = Path(data_dir)
-        self.data_dir.mkdir(exist_ok=True)
+        self.data_dir.mkdir(parents=True, exist_ok=True)
     
     def _get_date_str(self, date: Optional[datetime] = None) -> str:
         """Get date string in YYYY-MM-DD format.
@@ -343,7 +375,7 @@ class Storage:
     
     def get_available_plan_dates(self) -> list:
         """Get list of all available plan dates.
-        
+
         Returns:
             List of date strings (YYYY-MM-DD format), sorted descending
         """
@@ -353,4 +385,56 @@ class Storage:
             date_str = f.stem.replace("-plan", "")
             dates.append(date_str)
         return dates
+
+    def get_upcoming_tasks(self, days: int = 7) -> List[Dict[str, Any]]:
+        """Get tasks from upcoming days.
+
+        Args:
+            days: Number of days to look ahead (default: 7)
+
+        Returns:
+            List of dicts with 'date', 'date_str', 'job_name', 'task_description', 'is_subtask'
+        """
+        upcoming = []
+        today = datetime.now().date()
+
+        for day_offset in range(1, days + 1):
+            future_date = datetime.now() + timedelta(days=day_offset)
+            plan = self.load_plan(future_date)
+
+            if not plan:
+                continue
+
+            completion = plan.get('completion_status', {})
+            jobs = plan.get('jobs', [])
+
+            # Extract incomplete tasks recursively
+            def extract_tasks(job_list, parent_name=None):
+                tasks = []
+                for job in job_list:
+                    job_name = job.get('name') or job.get('task_name', 'Unknown')
+                    status = completion.get(job_name)
+
+                    # Only include pending tasks (not done or quit)
+                    if status != 'done' and status is not True and status != 'quit':
+                        task_info = {
+                            'date': future_date,
+                            'date_str': future_date.strftime("%Y-%m-%d"),
+                            'job_name': job_name,
+                            'task_description': job.get('user_input', job.get('description', '')),
+                            'is_subtask': parent_name is not None,
+                            'parent_name': parent_name
+                        }
+                        tasks.append(task_info)
+
+                    # Check sub-jobs
+                    sub_jobs = job.get('sub_jobs', [])
+                    if sub_jobs:
+                        tasks.extend(extract_tasks(sub_jobs, job_name))
+
+                return tasks
+
+            upcoming.extend(extract_tasks(jobs))
+
+        return upcoming
 

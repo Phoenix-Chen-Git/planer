@@ -34,3 +34,4 @@ deepseek:
 preferences:
   timezone: "Asia/Shanghai"
   language: "en"
+  upcoming_days: 7  # Number of days to show in upcoming tasks panel
