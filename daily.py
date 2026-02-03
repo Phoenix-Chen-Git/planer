@@ -355,7 +355,6 @@ def show_menu(console: Console) -> str:
     choices = [
         Choice("🌅 Plan my day", value="plan"),
         Choice("✅ Check tasks", value="check"),
-        Choice("🗂️ Plan by hierarchy", value="hierarchy"),
         Choice("📝 Add future task", value="future_task"),
         Choice("─" * 35, disabled=True),
         Choice("🌙 Summarize my day", value="summarize"),
@@ -522,10 +521,6 @@ def main():
             console.print("\n[dim]Opening feedback viewer...[/dim]\n")
             run_script("feedback.py", console)
         
-        elif choice == "hierarchy":
-            console.print("\n[dim]Opening hierarchy planner...[/dim]\n")
-            run_script("hierarchy.py", console)
-        
         elif choice == "calendar":
             console.print("\n[dim]Opening contribution calendar...[/dim]\n")
             run_script("calendar_view.py", console)
@@ -545,7 +540,7 @@ def main():
             break
         
         # Pause before showing menu again
-        if choice in ["plan", "check", "summarize", "feedback", "hierarchy", "calendar"]:
+        if choice in ["plan", "check", "summarize", "feedback", "calendar"]:
             console.print("\n[dim]Press Enter to return to menu...[/dim]")
             input()
 

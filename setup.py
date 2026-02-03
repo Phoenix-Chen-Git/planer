@@ -15,23 +15,25 @@ setup(
     author="Phoenix Chen",
     url="https://github.com/Phoenix-Chen-Git/planer",
     packages=find_packages(),
-    py_modules=['daily', 'plan', 'check', 'summarize', 'feedback', 'hierarchy'],
+    py_modules=['daily', 'plan', 'check', 'summarize', 'feedback', 'calendar_view', 'web_server'],
     install_requires=[
         "openai>=1.0.0",
         "rich>=13.0.0",
         "python-dotenv>=1.0.0",
         "PyYAML>=6.0",
         "questionary>=2.0.0",
+        "flask>=3.0.0",
     ],
     python_requires=">=3.8",
     entry_points={
         'console_scripts': [
             'daily=daily:main',
+            'daily-web=web_server:main',
             'daily-plan=plan:main',
             'daily-check=check:main',
             'daily-summarize=summarize:main',
             'daily-feedback=feedback:main',
-            'daily-hierarchy=hierarchy:main',
+            'daily-calendar=calendar_view:main',
         ],
     },
     classifiers=[

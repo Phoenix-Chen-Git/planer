@@ -30,6 +30,24 @@ class DeepSeekClient:
         self.temperature_chat = temperature_chat
         self.max_tokens = max_tokens
     
+    def get_completion(self, messages: List[Dict[str, str]], use_planning_temp: bool = False) -> str:
+        """Get a completion from the API with custom messages.
+        
+        Args:
+            messages: List of message dictionaries with 'role' and 'content'
+            use_planning_temp: If True, use planning temperature (focused), else chat temperature
+        
+        Returns:
+            Generated response as string
+        """
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=self.temperature_planning if use_planning_temp else self.temperature_chat,
+            max_tokens=self.max_tokens
+        )
+        return response.choices[0].message.content
+    
     def _format_sub_jobs(self, sub_jobs: List[Dict], depth: int = 1) -> str:
         """Recursively format sub-jobs for the prompt.
         

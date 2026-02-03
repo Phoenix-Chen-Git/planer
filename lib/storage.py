@@ -112,13 +112,14 @@ class Storage:
         with open(json_path, 'r', encoding='utf-8') as f:
             return json.load(f)
     
-    def save_log(self, log_data: Dict[str, Any]) -> None:
+    def save_log(self, log_data: Dict[str, Any], date: Optional[datetime] = None) -> None:
         """Save daily log.
         
         Args:
             log_data: Log data dictionary
+            date: Date for the log, defaults to today
         """
-        json_path = self.get_log_path()
+        json_path = self.get_log_path(date)
         with open(json_path, 'w', encoding='utf-8') as f:
             json.dump(log_data, f, indent=2, ensure_ascii=False)
     
@@ -148,6 +149,38 @@ class Storage:
             True if plan exists
         """
         return self.get_plan_path(date).exists()
+    
+    def get_todos_path(self) -> Path:
+        """Get path for to-dos file.
+        
+        Returns:
+            Path to todos.json
+        """
+        return self.data_dir / "todos.json"
+    
+    def load_todos(self) -> Dict[str, Any]:
+        """Load all to-dos.
+        
+        Returns:
+            Dictionary containing to-dos list
+        """
+        todos_path = self.get_todos_path()
+        
+        if not todos_path.exists():
+            return {'todos': []}
+        
+        with open(todos_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    
+    def save_todos(self, todos_data: Dict[str, Any]) -> None:
+        """Save to-dos data.
+        
+        Args:
+            todos_data: Dictionary containing to-dos list
+        """
+        todos_path = self.get_todos_path()
+        with open(todos_path, 'w', encoding='utf-8') as f:
+            json.dump(todos_data, f, indent=2, ensure_ascii=False)
     
     def get_feedback_path(self) -> Path:
         """Get path for centralized feedback file.

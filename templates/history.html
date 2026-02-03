@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>History - Daily Planner</title>
+    <link rel="stylesheet" href="/static/index.css">
+    <style>
+        .history-item {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            overflow: hidden;
+        }
+
+        .history-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .history-header:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .history-date {
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
+
+        .history-stats {
+            display: flex;
+            gap: 0.75rem;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        .stat-pill {
+            padding: 0.25rem 0.5rem;
+            background: var(--bg-primary);
+            border-radius: 12px;
+        }
+
+        .stat-pill.done {
+            background: rgba(63, 185, 80, 0.2);
+            color: #3fb950;
+        }
+
+        .history-content {
+            display: none;
+            padding: 1rem;
+            border-top: 1px solid var(--border);
+            background: var(--bg-primary);
+        }
+
+        .history-content.expanded {
+            display: block;
+        }
+
+        .section-title {
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+            color: var(--text-secondary);
+        }
+
+        .task-list-compact {
+            list-style: none;
+            padding: 0;
+            margin: 0 0 1rem 0;
+        }
+
+        .task-list-compact li {
+            padding: 0.5rem 0;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .task-list-compact li:last-child {
+            border-bottom: none;
+        }
+
+        .summary-text {
+            background: var(--bg-secondary);
+            padding: 1rem;
+            border-radius: 6px;
+            white-space: pre-wrap;
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+
+        .month-nav {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .month-label {
+            font-size: 1.25rem;
+            font-weight: 600;
+            min-width: 180px;
+            text-align: center;
+        }
+
+        .no-logs {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-muted);
+        }
+    </style>
+</head>
+
+<body>
+    <header class="header">
+        <div class="header-content">
+            <a href="/" class="logo">📅 Daily Planner</a>
+            <nav class="nav">
+                <a href="/" class="nav-link">Dashboard</a>
+                <a href="/plan" class="nav-link">Plan</a>
+                <a href="/tasks" class="nav-link">Tasks</a>
+                <a href="/todos" class="nav-link">To-Dos</a>
+                <a href="/history" class="nav-link active">History</a>
+                <a href="/feedback" class="nav-link">Feedback</a>
+                <a href="/summary" class="nav-link">Summary</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        <h1 style="margin-bottom: var(--space-lg);">📚 History</h1>
+
+        <!-- Month Navigation -->
+        <div class="month-nav card">
+            <button class="btn btn-secondary" onclick="prevMonth()">← Prev</button>
+            <span class="month-label" id="month-label"></span>
+            <button class="btn btn-secondary" onclick="nextMonth()">Next →</button>
+        </div>
+
+        <!-- History List -->
+        <div id="history-list"></div>
+
+        <div id="no-logs" class="card no-logs" style="display: none;">
+            <p>📭 No logs found for this month.</p>
+        </div>
+    </main>
+
+    <div class="toast-container" id="toast-container"></div>
+
+    <script>
+        let currentYear = new Date().getFullYear();
+        let currentMonth = new Date().getMonth(); // 0-indexed
+        let historyData = [];
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            updateMonthLabel();
+            await loadHistory();
+        });
+
+        function updateMonthLabel() {
+            const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                'July', 'August', 'September', 'October', 'November', 'December'];
+            document.getElementById('month-label').textContent =
+                `${monthNames[currentMonth]} ${currentYear}`;
+        }
+
+        function prevMonth() {
+            currentMonth--;
+            if (currentMonth < 0) {
+                currentMonth = 11;
+                currentYear--;
+            }
+            updateMonthLabel();
+            loadHistory();
+        }
+
+        function nextMonth() {
+            currentMonth++;
+            if (currentMonth > 11) {
+                currentMonth = 0;
+                currentYear++;
+            }
+            updateMonthLabel();
+            loadHistory();
+        }
+
+        async function loadHistory() {
+            try {
+                const response = await fetch(`/api/history/${currentYear}/${currentMonth + 1}`);
+                const data = await response.json();
+                historyData = data.entries || [];
+                renderHistory();
+            } catch (error) {
+                console.error('Failed to load history:', error);
+                showToast('Failed to load history', 'error');
+            }
+        }
+
+        function renderHistory() {
+            const container = document.getElementById('history-list');
+            const noLogs = document.getElementById('no-logs');
+
+            if (historyData.length === 0) {
+                container.innerHTML = '';
+                noLogs.style.display = 'block';
+                return;
+            }
+
+            noLogs.style.display = 'none';
+
+            // Sort by date descending (newest first)
+            historyData.sort((a, b) => b.date.localeCompare(a.date));
+
+            container.innerHTML = historyData.map((entry, idx) => {
+                const jobs = entry.plan?.jobs || [];
+                const completionStatus = entry.plan?.completion_status || {};
+
+                let doneCount = 0;
+                let quitCount = 0;
+                jobs.forEach((_, i) => {
+                    const status = completionStatus[i];
+                    if (status === 'done') doneCount++;
+                    else if (status === 'quit') quitCount++;
+                });
+
+                const hasSummary = entry.log && (entry.log.summary || entry.log.reflection);
+                const dateObj = new Date(entry.date + 'T00:00:00');
+                const formattedDate = dateObj.toLocaleDateString('en-US', {
+                    weekday: 'short', month: 'short', day: 'numeric'
+                });
+
+                return `
+                    <div class="history-item">
+                        <div class="history-header" onclick="toggleExpand(${idx})">
+                            <span class="history-date">📅 ${formattedDate}</span>
+                            <div class="history-stats">
+                                ${jobs.length > 0 ? `<span class="stat-pill">${jobs.length} tasks</span>` : ''}
+                                ${doneCount > 0 ? `<span class="stat-pill done">✓ ${doneCount} done</span>` : ''}
+                                ${hasSummary ? '<span class="stat-pill">📝 Summary</span>' : ''}
+                            </div>
+                        </div>
+                        <div class="history-content" id="content-${idx}">
+                            ${renderEntryContent(entry)}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderEntryContent(entry) {
+            const jobs = entry.plan?.jobs || [];
+            const completionStatus = entry.plan?.completion_status || {};
+            const log = entry.log;
+
+            let html = '';
+
+            // Tasks Section
+            if (jobs.length > 0) {
+                html += '<div class="section-title">📋 Tasks</div>';
+                html += '<ul class="task-list-compact">';
+                jobs.forEach((job, idx) => {
+                    const status = completionStatus[idx] || 'pending';
+                    const icon = status === 'done' ? '✅' : status === 'quit' ? '❌' : '⏳';
+                    html += `<li>${icon} <span>${escapeHtml(job.name)}</span></li>`;
+                });
+                html += '</ul>';
+            }
+
+            // Summary Section
+            if (log) {
+                if (log.summary || log.ai_generated_summary) {
+                    html += '<div class="section-title">📝 Summary</div>';
+                    html += `<div class="summary-text">${escapeHtml(log.summary || log.ai_generated_summary)}</div>`;
+                }
+                if (log.reflection) {
+                    html += '<div class="section-title" style="margin-top: 1rem;">💭 Reflection</div>';
+                    html += `<div class="summary-text">${escapeHtml(log.reflection)}</div>`;
+                }
+            }
+
+            if (!html) {
+                html = '<p style="color: var(--text-muted);">No detailed data available.</p>';
+            }
+
+            return html;
+        }
+
+        function toggleExpand(idx) {
+            const content = document.getElementById(`content-${idx}`);
+            content.classList.toggle('expanded');
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text || '';
+            return div.innerHTML;
+        }
+    </script>
+</body>
+
+</html>

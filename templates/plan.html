@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plan My Day - Daily Planner</title>
+    <link rel="stylesheet" href="/static/index.css">
+</head>
+
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-content">
+            <a href="/" class="logo">📅 Daily Planner</a>
+            <nav class="nav">
+                <a href="/" class="nav-link">Dashboard</a>
+                <a href="/plan" class="nav-link active">Plan</a>
+                <a href="/tasks" class="nav-link">Tasks</a>
+                <a href="/todos" class="nav-link">To-Dos</a>
+                <a href="/history" class="nav-link">History</a>
+                <a href="/feedback" class="nav-link">Feedback</a>
+                <a href="/summary" class="nav-link">Summary</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        <h1 style="margin-bottom: var(--space-lg);">🌅 Plan My Day</h1>
+
+        <!-- Workflow Check -->
+        <div id="workflow-blocker" class="alert alert-warning fade-in" style="display: none;">
+            <span>⚠️</span>
+            <div>
+                <strong>Summary Required</strong><br>
+                <span id="blocker-message">Please complete yesterday's summary before planning today.</span>
+                <a href="/summary" class="btn btn-primary" style="margin-top: var(--space-sm);">Complete Summary</a>
+            </div>
+        </div>
+
+        <!-- Yesterday's Summary -->
+        <div id="yesterday-summary" class="card fade-in" style="margin-bottom: var(--space-lg); display: none;">
+            <div class="card-header">
+                <h2 class="card-title">📋 Yesterday's Summary</h2>
+            </div>
+            <div id="summary-content" style="color: var(--text-secondary);"></div>
+        </div>
+
+        <!-- Plan Form -->
+        <div id="plan-form" class="card fade-in">
+            <div class="card-header">
+                <h2 class="card-title">📝 Today's Plan</h2>
+                <span id="plan-date" style="color: var(--text-muted);"></span>
+            </div>
+
+            <!-- Job List -->
+            <div id="jobs-container"></div>
+
+            <!-- Add Job Button -->
+            <div style="margin: var(--space-lg) 0;">
+                <button class="btn btn-secondary" onclick="showJobSelector()">
+                    ➕ Add Task
+                </button>
+            </div>
+
+            <!-- AI Assist -->
+            <div class="form-group">
+                <label class="form-label">🤖 AI-Generated Plan (optional)</label>
+                <div style="display: flex; gap: var(--space-sm);">
+                    <button class="btn btn-secondary" onclick="generateAIPlan()">
+                        Generate with AI
+                    </button>
+                </div>
+                <textarea id="ai-plan-content" class="form-textarea" placeholder="AI will generate a structured plan..."
+                    style="margin-top: var(--space-sm);"></textarea>
+            </div>
+
+            <!-- Save Button -->
+            <button class="btn btn-primary btn-lg btn-block" onclick="savePlan()">
+                💾 Save Plan
+            </button>
+        </div>
+    </main>
+
+    <!-- Job Selector Modal -->
+    <div class="modal-overlay" id="job-modal">
+        <div class="modal">
+            <h3 style="margin-bottom: var(--space-lg);">Select Task Category</h3>
+            <div id="job-options"></div>
+            <button class="btn btn-secondary btn-block" style="margin-top: var(--space-md);" onclick="closeJobModal()">
+                Cancel
+            </button>
+        </div>
+    </div>
+
+    <div class="toast-container" id="toast-container"></div>
+
+    <script>
+        let jobs = [];
+        let availableJobs = [];
+        let canPlan = false;
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            await checkWorkflow();
+            await loadJobCategories();
+            await loadExistingPlan();
+            updateDateDisplay();
+        });
+
+        function updateDateDisplay() {
+            document.getElementById('plan-date').textContent = new Date().toLocaleDateString('en-US', {
+                weekday: 'long', month: 'long', day: 'numeric', year: 'numeric'
+            });
+        }
+
+        async function checkWorkflow() {
+            try {
+                const response = await fetch('/api/workflow-check');
+                const data = await response.json();
+
+                canPlan = data.can_plan;
+
+                if (!canPlan) {
+                    document.getElementById('workflow-blocker').style.display = 'flex';
+                    document.getElementById('plan-form').style.opacity = '0.5';
+                    document.getElementById('plan-form').style.pointerEvents = 'none';
+                } else if (data.yesterday_summary) {
+                    document.getElementById('yesterday-summary').style.display = 'block';
+                    const summary = data.yesterday_summary.summary || data.yesterday_summary.ai_generated_summary || 'No summary content.';
+                    document.getElementById('summary-content').innerHTML = marked ? marked.parse(summary) : summary;
+                }
+            } catch (error) {
+                console.error('Workflow check failed:', error);
+            }
+        }
+
+        async function loadJobCategories() {
+            try {
+                const response = await fetch('/api/jobs');
+                const data = await response.json();
+                availableJobs = data.jobs || [];
+                renderJobOptions();
+            } catch (error) {
+                console.error('Failed to load jobs:', error);
+            }
+        }
+
+        function renderJobOptions() {
+            const container = document.getElementById('job-options');
+            container.innerHTML = availableJobs.map(job => `
+                <div class="action-card" onclick="addJob('${escapeHtml(job.name)}', '${escapeHtml(job.description || '')}')">
+                    <div class="action-title">${escapeHtml(job.name)}</div>
+                </div>
+            `).join('');
+        }
+
+        async function loadExistingPlan() {
+            try {
+                const today = new Date().toISOString().split('T')[0];
+                const response = await fetch(`/api/plan/${today}`);
+                const data = await response.json();
+
+                if (data.plan && data.plan.jobs) {
+                    jobs = data.plan.jobs;
+                    renderJobs();
+                    document.getElementById('ai-plan-content').value = data.plan.plan_content || '';
+                }
+            } catch (error) {
+                console.error('Failed to load existing plan:', error);
+            }
+        }
+
+        function showJobSelector() {
+            document.getElementById('job-modal').classList.add('active');
+        }
+
+        function closeJobModal() {
+            document.getElementById('job-modal').classList.remove('active');
+        }
+
+        function addJob(name, description) {
+            closeJobModal();
+            jobs.push({
+                name: name,
+                description: description,
+                user_input: '',
+                sub_jobs: []
+            });
+            renderJobs();
+        }
+
+        function renderJobs() {
+            const container = document.getElementById('jobs-container');
+
+            if (jobs.length === 0) {
+                container.innerHTML = `
+                    <div style="text-align: center; padding: var(--space-xl); color: var(--text-muted);">
+                        <p>No tasks added yet.</p>
+                        <p>Click "Add Task" to start planning.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = jobs.map((job, idx) => `
+                <div class="card" style="margin-bottom: var(--space-md); background: var(--bg-tertiary);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-sm);">
+                        <strong>${escapeHtml(job.name)}</strong>
+                        <button class="btn btn-danger" style="padding: 4px 8px; font-size: 0.75rem;" onclick="removeJob(${idx})">✕</button>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <input type="text" class="form-input" 
+                               placeholder="What do you want to accomplish?"
+                               value="${escapeHtml(job.user_input || '')}"
+                               onchange="updateJobInput(${idx}, this.value)">
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function updateJobInput(idx, value) {
+            jobs[idx].user_input = value;
+        }
+
+        function removeJob(idx) {
+            jobs.splice(idx, 1);
+            renderJobs();
+        }
+
+        async function generateAIPlan() {
+            if (jobs.length === 0) {
+                showToast('Add some tasks first!', 'warning');
+                return;
+            }
+
+            const btn = event.target;
+            btn.textContent = 'Generating...';
+            btn.disabled = true;
+
+            try {
+                const response = await fetch('/api/ai/plan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ jobs })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    document.getElementById('ai-plan-content').value = data.content;
+                    showToast('AI plan generated!');
+                } else {
+                    showToast(data.error || 'AI failed', 'error');
+                }
+            } catch (error) {
+                showToast('Failed to generate AI plan', 'error');
+            }
+
+            btn.textContent = 'Generate with AI';
+            btn.disabled = false;
+        }
+
+        async function savePlan() {
+            if (jobs.length === 0) {
+                showToast('Add at least one task!', 'warning');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/plan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        jobs: jobs,
+                        plan_content: document.getElementById('ai-plan-content').value
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showToast('✅ Plan saved!');
+                    setTimeout(() => window.location.href = '/', 1500);
+                } else if (data.workflow_blocked) {
+                    showToast(data.error, 'warning');
+                } else {
+                    showToast(data.error || 'Save failed', 'error');
+                }
+            } catch (error) {
+                showToast('Failed to save plan', 'error');
+            }
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text || '';
+            return div.innerHTML;
+        }
+    </script>
+</body>
+
+</html>

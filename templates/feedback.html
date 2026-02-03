@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Feedback - Daily Planner</title>
+    <link rel="stylesheet" href="/static/index.css">
+    <style>
+        .feedback-item {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .feedback-item.implemented {
+            border-color: #3fb950;
+            background: rgba(63, 185, 80, 0.1);
+        }
+
+        .feedback-item.dismissed {
+            opacity: 0.5;
+        }
+
+        .feedback-content {
+            margin-bottom: 0.75rem;
+            line-height: 1.6;
+        }
+
+        .feedback-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .feedback-date {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        .feedback-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .status-badge {
+            padding: 0.25rem 0.5rem;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .status-pending {
+            background: rgba(210, 153, 34, 0.2);
+            color: #d29922;
+        }
+
+        .status-implemented {
+            background: rgba(63, 185, 80, 0.2);
+            color: #3fb950;
+        }
+
+        .status-dismissed {
+            background: var(--bg-tertiary);
+            color: var(--text-muted);
+        }
+
+        .add-feedback-form {
+            padding: 1rem;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+        }
+
+        .add-feedback-form textarea {
+            width: 100%;
+            min-height: 100px;
+            margin-bottom: 1rem;
+            padding: 0.75rem;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            resize: vertical;
+        }
+
+        .filter-tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .filter-tab {
+            padding: 0.5rem 1rem;
+            border: 1px solid var(--border);
+            background: var(--bg-secondary);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: var(--text-secondary);
+        }
+
+        .filter-tab:hover {
+            border-color: var(--accent-cyan);
+        }
+
+        .filter-tab.active {
+            background: var(--accent-cyan);
+            color: white;
+            border-color: var(--accent-cyan);
+        }
+    </style>
+</head>
+
+<body>
+    <header class="header">
+        <div class="header-content">
+            <a href="/" class="logo">📅 Daily Planner</a>
+            <nav class="nav">
+                <a href="/" class="nav-link">Dashboard</a>
+                <a href="/plan" class="nav-link">Plan</a>
+                <a href="/tasks" class="nav-link">Tasks</a>
+                <a href="/todos" class="nav-link">To-Dos</a>
+                <a href="/history" class="nav-link">History</a>
+                <a href="/feedback" class="nav-link active">Feedback</a>
+                <a href="/summary" class="nav-link">Summary</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        <h1 style="margin-bottom: var(--space-lg);">💬 Feedback</h1>
+
+        <!-- Add Feedback Form -->
+        <div class="add-feedback-form card">
+            <h3 style="margin: 0 0 1rem 0;">➕ Add Feedback</h3>
+            <textarea id="feedback-input" placeholder="Share your thoughts, ideas, or improvements..."></textarea>
+            <button class="btn btn-primary" onclick="addFeedback()">Submit Feedback</button>
+        </div>
+
+        <!-- Filter Tabs -->
+        <div class="filter-tabs">
+            <button class="filter-tab active" data-filter="all" onclick="setFilter('all')">All</button>
+            <button class="filter-tab" data-filter="pending" onclick="setFilter('pending')">Pending</button>
+            <button class="filter-tab" data-filter="implemented" onclick="setFilter('implemented')">Implemented</button>
+            <button class="filter-tab" data-filter="dismissed" onclick="setFilter('dismissed')">Dismissed</button>
+        </div>
+
+        <!-- Feedback List -->
+        <div id="feedback-list"></div>
+
+        <div id="empty-message" class="card" style="text-align: center; padding: 2rem; display: none;">
+            <p style="color: var(--text-muted);">📭 No feedback yet. Add some above!</p>
+        </div>
+    </main>
+
+    <div class="toast-container" id="toast-container"></div>
+
+    <script>
+        let feedbackList = [];
+        let currentFilter = 'all';
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            await loadFeedback();
+        });
+
+        async function loadFeedback() {
+            try {
+                const response = await fetch('/api/feedback');
+                const data = await response.json();
+                feedbackList = data.feedback_entries || [];
+                renderFeedback();
+            } catch (error) {
+                console.error('Failed to load feedback:', error);
+                showToast('Failed to load feedback', 'error');
+            }
+        }
+
+        function renderFeedback() {
+            const container = document.getElementById('feedback-list');
+            const emptyMsg = document.getElementById('empty-message');
+
+            // Filter
+            let filtered = feedbackList;
+            if (currentFilter !== 'all') {
+                filtered = feedbackList.filter(f => (f.status || 'pending') === currentFilter);
+            }
+
+            if (filtered.length === 0) {
+                container.innerHTML = '';
+                emptyMsg.style.display = 'block';
+                return;
+            }
+
+            emptyMsg.style.display = 'none';
+
+            // Sort by date descending
+            filtered.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+            container.innerHTML = filtered.map((fb, idx) => {
+                const realIdx = feedbackList.indexOf(fb);
+                const status = fb.status || 'pending';
+
+                return `
+                    <div class="feedback-item ${status}">
+                        <div class="feedback-content">${escapeHtml(fb.original_feedback || fb.content)}</div>
+                        ${fb.final_understanding ? `<div class="feedback-content" style="color: var(--text-secondary); font-style: italic; border-left: 3px solid var(--accent-cyan); padding-left: 0.75rem;">💡 ${escapeHtml(fb.final_understanding)}</div>` : ''}
+                        <div class="feedback-meta">
+                            <div>
+                                <span class="feedback-date">📅 ${fb.date || 'Unknown date'}</span>
+                                <span class="status-badge status-${status}">${status}</span>
+                            </div>
+                            <div class="feedback-actions">
+                                ${status !== 'implemented' ? `<button class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem;" onclick="updateStatus(${realIdx}, 'implemented')" title="Mark as implemented">✅</button>` : ''}
+                                ${status !== 'dismissed' ? `<button class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem;" onclick="updateStatus(${realIdx}, 'dismissed')" title="Dismiss">✕</button>` : ''}
+                                ${status !== 'pending' ? `<button class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem;" onclick="updateStatus(${realIdx}, 'pending')" title="Reopen">🔄</button>` : ''}
+                                <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem; color: #f85149;" onclick="deleteFeedback(${realIdx})" title="Delete">🗑️</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function setFilter(filter) {
+            currentFilter = filter;
+            document.querySelectorAll('.filter-tab').forEach(tab => {
+                tab.classList.toggle('active', tab.dataset.filter === filter);
+            });
+            renderFeedback();
+        }
+
+        async function addFeedback() {
+            const input = document.getElementById('feedback-input');
+            const content = input.value.trim();
+
+            if (!content) {
+                showToast('Please enter some feedback', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/feedback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ content })
+                });
+
+                if (response.ok) {
+                    input.value = '';
+                    showToast('✅ Feedback added!');
+                    await loadFeedback();
+                } else {
+                    const data = await response.json();
+                    throw new Error(data.error);
+                }
+            } catch (error) {
+                showToast('Failed to add feedback: ' + error.message, 'error');
+            }
+        }
+
+        async function updateStatus(idx, status) {
+            try {
+                const response = await fetch(`/api/feedback/${idx}/status`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status })
+                });
+
+                if (response.ok) {
+                    showToast(`Feedback marked as ${status}`);
+                    await loadFeedback();
+                }
+            } catch (error) {
+                showToast('Failed to update status', 'error');
+            }
+        }
+
+        async function deleteFeedback(idx) {
+            if (!confirm('Delete this feedback?')) return;
+
+            try {
+                const response = await fetch(`/api/feedback/${idx}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    showToast('🗑️ Feedback deleted');
+                    await loadFeedback();
+                }
+            } catch (error) {
+                showToast('Failed to delete feedback', 'error');
+            }
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text || '';
+            return div.innerHTML;
+        }
+    </script>
+</body>
+
+</html>

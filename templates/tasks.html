@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Check Tasks - Daily Planner</title>
+    <link rel="stylesheet" href="/static/index.css">
+    <style>
+        /* Sub-task styles */
+        .sub-task-list {
+            margin-left: 2rem;
+            border-left: 2px solid var(--border);
+            padding-left: 1rem;
+            margin-top: 0.5rem;
+        }
+
+        .sub-task-item {
+            display: flex;
+            align-items: center;
+            gap: var(--space-sm);
+            padding: 0.5rem 0;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
+        .sub-task-item.completed {
+            text-decoration: line-through;
+            opacity: 0.6;
+        }
+
+        .btn-add-sub {
+            background: linear-gradient(135deg, #a855f7, #7c3aed);
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            font-size: 0.7rem;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-add-sub:hover {
+            transform: scale(1.05);
+            box-shadow: 0 2px 8px rgba(168, 85, 247, 0.4);
+        }
+
+        .btn-add-sub:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Modal styles */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 1.5rem;
+            max-width: 500px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            border: 1px solid var(--border);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .modal-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 1.5rem;
+            cursor: pointer;
+        }
+
+        .sub-task-preview {
+            background: var(--bg-primary);
+            border-radius: 8px;
+            padding: 1rem;
+            margin: 1rem 0;
+        }
+
+        .sub-task-preview-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .sub-task-preview-item:last-child {
+            border-bottom: none;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--text-muted);
+            border-top-color: var(--accent-cyan);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 0.5rem;
+            justify-content: flex-end;
+            margin-top: 1rem;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-content">
+            <a href="/" class="logo">📅 Daily Planner</a>
+            <nav class="nav">
+                <a href="/" class="nav-link">Dashboard</a>
+                <a href="/plan" class="nav-link">Plan</a>
+                <a href="/tasks" class="nav-link active">Tasks</a>
+                <a href="/todos" class="nav-link">To-Dos</a>
+                <a href="/history" class="nav-link">History</a>
+                <a href="/feedback" class="nav-link">Feedback</a>
+                <a href="/summary" class="nav-link">Summary</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        <div
+            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-lg);">
+            <h1>✅ Today's Tasks</h1>
+            <div id="stats-badge"></div>
+        </div>
+
+        <!-- No Plan -->
+        <div id="no-plan" class="card fade-in" style="text-align: center; display: none;">
+            <div style="padding: var(--space-xl);">
+                <div style="font-size: 3rem; margin-bottom: var(--space-md);">📭</div>
+                <h2>No plan for today</h2>
+                <p style="color: var(--text-secondary); margin: var(--space-md) 0;">
+                    Create a plan to start tracking your tasks.
+                </p>
+                <a href="/plan" class="btn btn-primary btn-lg">Create Plan</a>
+            </div>
+        </div>
+
+        <!-- Task List -->
+        <div id="task-container" class="card fade-in">
+            <ul class="task-list" id="task-list"></ul>
+        </div>
+
+        <!-- Progress -->
+        <div class="card fade-in" style="margin-top: var(--space-lg);">
+            <div class="card-header">
+                <h2 class="card-title">📊 Progress</h2>
+            </div>
+            <div class="progress-bar" style="height: 16px;">
+                <div class="progress-fill" id="progress-fill" style="width: 0%;"></div>
+            </div>
+            <div id="progress-text"
+                style="text-align: center; margin-top: var(--space-sm); color: var(--text-secondary);"></div>
+        </div>
+    </main>
+
+    <!-- Sub-task Modal -->
+    <div class="modal-overlay" id="subtask-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">🧩 Add Sub-tasks</h3>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div id="modal-content">
+                <div id="parent-task-info"
+                    style="padding: 0.75rem; background: var(--bg-primary); border-radius: 8px; margin-bottom: 1rem;">
+                    <!-- Parent task info will be inserted here -->
+                </div>
+
+                <!-- Manual Input Section -->
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">
+                        ✏️ Add sub-task manually:
+                    </label>
+                    <div style="display: flex; gap: 0.5rem;">
+                        <input type="text" id="manual-subtask-input"
+                            placeholder="Type a sub-task and press Enter or Add"
+                            style="flex: 1; padding: 0.5rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary);"
+                            onkeypress="if(event.key === 'Enter') addManualSubtask()">
+                        <button class="btn btn-secondary" onclick="addManualSubtask()" style="padding: 0.5rem 1rem;">
+                            Add
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Divider -->
+                <div style="display: flex; align-items: center; gap: 1rem; margin: 1rem 0; color: var(--text-muted);">
+                    <div style="flex: 1; height: 1px; background: var(--border);"></div>
+                    <span>or</span>
+                    <div style="flex: 1; height: 1px; background: var(--border);"></div>
+                </div>
+
+                <!-- AI Generation Section -->
+                <div style="margin-bottom: 1rem;">
+                    <button class="btn btn-primary" id="generate-btn" onclick="generateSubtasks()" style="width: 100%;">
+                        🤖 Generate with DeepSeek AI
+                    </button>
+                </div>
+
+                <div id="subtask-loading" style="display: none; text-align: center; padding: 1rem;">
+                    <div class="loading-spinner"></div>
+                    <p style="margin-top: 0.5rem; color: var(--text-secondary);">Generating sub-tasks...</p>
+                </div>
+
+                <!-- Sub-tasks Preview -->
+                <div id="subtask-preview" class="sub-task-preview" style="display: none;">
+                    <label
+                        style="display: block; margin-bottom: 0.5rem; font-weight: 500; color: var(--text-secondary);">
+                        📋 Sub-tasks to add:
+                    </label>
+                    <div id="subtask-list"></div>
+                </div>
+
+                <div class="modal-actions">
+                    <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button class="btn btn-success" id="save-btn" onclick="saveSubtasks()" style="display: none;">
+                        💾 Save Sub-tasks
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast-container" id="toast-container"></div>
+
+    <script>
+        let plan = null;
+        let completionStatus = {};
+        let currentTaskIndex = null;
+        let generatedSubtasks = [];
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            await loadTasks();
+        });
+
+        async function loadTasks() {
+            try {
+                const response = await fetch('/api/today');
+                const data = await response.json();
+
+                if (!data.plan || !data.plan.jobs || data.plan.jobs.length === 0) {
+                    document.getElementById('no-plan').style.display = 'block';
+                    document.getElementById('task-container').style.display = 'none';
+                    return;
+                }
+
+                plan = data.plan;
+                completionStatus = plan.completion_status || {};
+
+                renderTasks();
+                updateProgress();
+            } catch (error) {
+                console.error('Failed to load tasks:', error);
+                showToast('Failed to load tasks', 'error');
+            }
+        }
+
+        function renderTasks() {
+            const container = document.getElementById('task-list');
+
+            container.innerHTML = plan.jobs.map((job, idx) => {
+                const status = completionStatus[idx] || 'pending';
+                const isCompleted = status === 'done';
+                const isQuit = status === 'quit';
+                const subJobs = job.sub_jobs || [];
+
+                // Recursive function to render sub-tasks at any depth
+                function renderSubTasksHtml(subJobs, parentPath) {
+                    if (!subJobs || subJobs.length === 0) return '';
+
+                    return `
+                        <ul class="sub-task-list" style="margin-left: ${parentPath.length > 1 ? '1rem' : '0'};">
+                            ${subJobs.map((sub, subIdx) => {
+                        const currentPath = [...parentPath, subIdx];
+                        const pathKey = currentPath.join('_');
+                        const subStatus = completionStatus[pathKey] || 'pending';
+                        const subCompleted = subStatus === 'done';
+                        const nestedSubs = sub.sub_jobs || [];
+
+                        return `
+                                    <li class="sub-task-item ${subCompleted ? 'completed' : ''}">
+                                        <div style="display: flex; align-items: center; gap: 0.5rem; flex: 1;">
+                                            <input type="checkbox" class="task-checkbox" 
+                                                   ${subCompleted ? 'checked' : ''} 
+                                                   onclick="setSubStatusPath('${pathKey}', '${subCompleted ? 'pending' : 'done'}')">
+                                            <span style="flex: 1;">${escapeHtml(sub.name || sub.description || sub)}</span>
+                                            <button class="btn btn-secondary" 
+                                                    style="padding: 2px 6px; font-size: 0.7rem;"
+                                                    title="Add nested sub-task"
+                                                    onclick="openSubtaskModalNested('${pathKey}', '${escapeHtml(sub.name || sub.description || '')}')">➕</button>
+                                        </div>
+                                        ${renderSubTasksHtml(nestedSubs, currentPath)}
+                                    </li>
+                                `;
+                    }).join('')}
+                        </ul>
+                    `;
+                }
+
+                const subTasksHtml = renderSubTasksHtml(subJobs, [idx]);
+
+                return `
+                    <li class="task-item ${isCompleted ? 'completed' : ''}" id="task-${idx}">
+                        <input type="checkbox" class="task-checkbox" 
+                               ${isCompleted ? 'checked' : ''} 
+                               onclick="toggleTask(${idx})">
+                        <div class="task-content">
+                            <div class="task-name">${escapeHtml(job.name)}</div>
+                            <div class="task-description">${escapeHtml(job.user_input || job.description || '')}</div>
+                            ${subTasksHtml}
+                        </div>
+                        <div style="display: flex; gap: var(--space-xs); flex-wrap: wrap;">
+                            <button class="btn btn-add-sub" 
+                                    title="Add sub-tasks"
+                                    onclick="openSubtaskModal(${idx})">➕ Sub</button>
+                            <button class="btn ${status === 'done' ? 'btn-success' : 'btn-secondary'}" 
+                                    style="padding: 4px 8px; font-size: 0.75rem;"
+                                    title="Mark as done"
+                                    onclick="setStatus(${idx}, 'done')">✅</button>
+                            <button class="btn ${status === 'quit' ? 'btn-danger' : 'btn-secondary'}" 
+                                    style="padding: 4px 8px; font-size: 0.75rem;"
+                                    title="Mark as quit"
+                                    onclick="setStatus(${idx}, 'quit')">✕</button>
+                            <button class="btn btn-secondary" 
+                                    style="padding: 4px 8px; font-size: 0.75rem; color: #f85149;"
+                                    title="Remove this task"
+                                    onclick="removeTask(${idx})">🗑️</button>
+                        </div>
+                    </li>
+                `;
+            }).join('');
+        }
+
+        async function toggleTask(idx) {
+            const currentStatus = completionStatus[idx] || 'pending';
+            const newStatus = currentStatus === 'done' ? 'pending' : 'done';
+            await setStatus(idx, newStatus);
+        }
+
+        async function setStatus(idx, status) {
+            try {
+                const response = await fetch('/api/task/toggle', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ job_index: idx, status })
+                });
+
+                if (response.ok) {
+                    completionStatus[idx] = status;
+                    renderTasks();
+                    updateProgress();
+
+                    if (status === 'done') {
+                        showToast('✅ Task completed!');
+                    } else if (status === 'quit') {
+                        showToast('Task marked as quit');
+                    }
+                }
+            } catch (error) {
+                showToast('Failed to update task', 'error');
+            }
+        }
+
+        async function setSubStatus(jobIdx, subIdx, status) {
+            try {
+                const response = await fetch('/api/task/toggle', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ job_index: jobIdx, sub_job_index: subIdx, status })
+                });
+
+                if (response.ok) {
+                    completionStatus[`${jobIdx}_${subIdx}`] = status;
+                    renderTasks();
+                    updateProgress();
+
+                    if (status === 'done') {
+                        showToast('✅ Sub-task completed!');
+                    }
+                }
+            } catch (error) {
+                showToast('Failed to update sub-task', 'error');
+            }
+        }
+
+        // Handle nested sub-task status using path key (e.g., "0_1_2")
+        async function setSubStatusPath(pathKey, status) {
+            try {
+                const response = await fetch('/api/task/toggle', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path_key: pathKey, status })
+                });
+
+                if (response.ok) {
+                    completionStatus[pathKey] = status;
+                    renderTasks();
+                    updateProgress();
+
+                    if (status === 'done') {
+                        showToast('✅ Sub-task completed!');
+                    }
+                }
+            } catch (error) {
+                showToast('Failed to update sub-task', 'error');
+            }
+        }
+
+        // Track current path for nested sub-tasks
+        let currentSubtaskPath = null;
+
+        function openSubtaskModalNested(pathKey, parentName) {
+            currentTaskIndex = null;  // Not a top-level task
+            currentSubtaskPath = pathKey;
+            generatedSubtasks = [];
+
+            // Show parent task info
+            document.getElementById('parent-task-info').innerHTML = `
+                <strong>📁 ${escapeHtml(parentName)}</strong>
+                <br><span style="color: var(--text-secondary); font-size: 0.85rem;">Adding sub-tasks to: ${pathKey.split('_').map((v, i) => i === 0 ? plan.jobs[v]?.name || 'Task' : `Sub ${v}`).join(' → ')}</span>
+            `;
+
+            // Reset modal state
+            document.getElementById('subtask-loading').style.display = 'none';
+            document.getElementById('subtask-preview').style.display = 'none';
+            document.getElementById('save-btn').style.display = 'none';
+            document.getElementById('manual-subtask-input').value = '';
+            document.getElementById('generate-btn').textContent = '🤖 Generate with DeepSeek AI';
+
+            // Show modal
+            document.getElementById('subtask-modal').classList.add('active');
+        }
+
+        async function removeTask(idx) {
+            const job = plan.jobs[idx];
+            if (!confirm(`Remove "${job.name}" from today's tasks?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/task/remove', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ job_index: idx })
+                });
+
+                if (response.ok) {
+                    showToast('🗑️ Task removed!');
+                    await loadTasks(); // Reload to refresh list
+                } else {
+                    const data = await response.json();
+                    throw new Error(data.error || 'Failed to remove task');
+                }
+            } catch (error) {
+                console.error('Error removing task:', error);
+                showToast('Failed to remove task: ' + error.message, 'error');
+            }
+        }
+
+        function updateProgress() {
+            // Count main tasks and sub-tasks
+            let total = 0;
+            let completed = 0;
+            let quit = 0;
+
+            plan.jobs.forEach((job, idx) => {
+                total++;
+                const status = completionStatus[idx];
+                if (status === 'done') completed++;
+                else if (status === 'quit') quit++;
+
+                // Count sub-tasks
+                (job.sub_jobs || []).forEach((_, subIdx) => {
+                    total++;
+                    const subStatus = completionStatus[`${idx}_${subIdx}`];
+                    if (subStatus === 'done') completed++;
+                    else if (subStatus === 'quit') quit++;
+                });
+            });
+
+            const pending = total - completed - quit;
+            const percent = total > 0 ? Math.round(completed / total * 100) : 0;
+
+            document.getElementById('progress-fill').style.width = percent + '%';
+            document.getElementById('progress-text').textContent =
+                `${completed} completed, ${pending} pending, ${quit} quit — ${percent}% done`;
+
+            document.getElementById('stats-badge').innerHTML = `
+                <span class="streak-badge" style="background: ${percent >= 80 ? 'linear-gradient(135deg, #3fb950, #2ea043)' : 'linear-gradient(135deg, #58a6ff, #1f6feb)'};">
+                    ${completed}/${total} tasks
+                </span>
+            `;
+        }
+
+        // ============ Sub-task Modal Functions ============
+
+        function openSubtaskModal(idx) {
+            currentTaskIndex = idx;
+            generatedSubtasks = [];
+            const job = plan.jobs[idx];
+
+            // Show parent task info (description is optional)
+            const description = job.user_input || job.description || '';
+            document.getElementById('parent-task-info').innerHTML = `
+                <strong>${escapeHtml(job.name)}</strong>
+                ${description ? `<br><span style="color: var(--text-secondary); font-size: 0.9rem;">${escapeHtml(description)}</span>` : ''}
+            `;
+
+            // Reset modal state
+            document.getElementById('subtask-loading').style.display = 'none';
+            document.getElementById('subtask-preview').style.display = 'none';
+            document.getElementById('save-btn').style.display = 'none';
+            document.getElementById('manual-subtask-input').value = '';
+            document.getElementById('generate-btn').textContent = '🤖 Generate with DeepSeek AI';
+
+            // Show modal
+            document.getElementById('subtask-modal').classList.add('active');
+        }
+
+        function closeModal() {
+            document.getElementById('subtask-modal').classList.remove('active');
+            currentTaskIndex = null;
+            generatedSubtasks = [];
+        }
+
+        async function generateSubtasks() {
+            if (currentTaskIndex === null) return;
+
+            const job = plan.jobs[currentTaskIndex];
+
+            // Show loading
+            document.getElementById('subtask-loading').style.display = 'block';
+            document.getElementById('subtask-preview').style.display = 'none';
+            document.getElementById('generate-btn').disabled = true;
+
+            try {
+                const response = await fetch('/api/ai/subtasks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        job_name: job.name,
+                        job_description: job.user_input || job.description || ''
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success && data.subtasks) {
+                    generatedSubtasks = data.subtasks;
+                    renderSubtaskPreview(generatedSubtasks);
+                } else {
+                    throw new Error(data.error || 'Failed to generate sub-tasks');
+                }
+            } catch (error) {
+                console.error('Error generating sub-tasks:', error);
+                showToast('Failed to generate sub-tasks: ' + error.message, 'error');
+            } finally {
+                document.getElementById('subtask-loading').style.display = 'none';
+                document.getElementById('generate-btn').disabled = false;
+            }
+        }
+
+        function renderSubtaskPreview(subtasks) {
+            const preview = document.getElementById('subtask-preview');
+            const listEl = document.getElementById('subtask-list');
+
+            if (subtasks.length === 0) {
+                preview.style.display = 'none';
+                document.getElementById('save-btn').style.display = 'none';
+                return;
+            }
+
+            listEl.innerHTML = subtasks.map((sub, idx) => `
+                <div class="sub-task-preview-item">
+                    <span style="color: var(--accent-cyan);">📌</span>
+                    <input type="text" value="${escapeHtml(sub)}" 
+                           style="flex: 1; background: transparent; border: none; color: var(--text-primary); font-size: 0.9rem;"
+                           onchange="updateSubtask(${idx}, this.value)">
+                    <button onclick="removeSubtask(${idx})" 
+                            style="background: none; border: none; color: var(--text-muted); cursor: pointer;">✕</button>
+                </div>
+            `).join('');
+
+            preview.style.display = 'block';
+            document.getElementById('generate-btn').textContent = '🔄 Regenerate';
+            document.getElementById('save-btn').style.display = 'inline-block';
+        }
+
+        function addManualSubtask() {
+            const input = document.getElementById('manual-subtask-input');
+            const value = input.value.trim();
+
+            if (!value) {
+                showToast('Please enter a sub-task', 'error');
+                return;
+            }
+
+            generatedSubtasks.push(value);
+            input.value = '';
+            renderSubtaskPreview(generatedSubtasks);
+            showToast('Sub-task added!');
+        }
+
+        function updateSubtask(idx, value) {
+            generatedSubtasks[idx] = value;
+        }
+
+        function removeSubtask(idx) {
+            generatedSubtasks.splice(idx, 1);
+            renderSubtaskPreview(generatedSubtasks);
+        }
+
+        async function saveSubtasks() {
+            // Check if we have something to save
+            if (currentTaskIndex === null && currentSubtaskPath === null) return;
+            if (generatedSubtasks.length === 0) return;
+
+            try {
+                const requestBody = {
+                    subtasks: generatedSubtasks
+                };
+
+                // Either use job_index for top-level tasks or path_key for nested
+                if (currentTaskIndex !== null) {
+                    requestBody.job_index = currentTaskIndex;
+                } else if (currentSubtaskPath !== null) {
+                    requestBody.path_key = currentSubtaskPath;
+                }
+
+                const response = await fetch('/api/task/add-subtasks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestBody)
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showToast('✅ Sub-tasks added successfully!');
+                    closeModal();
+                    currentSubtaskPath = null;
+                    await loadTasks(); // Reload to show new sub-tasks
+                } else {
+                    throw new Error(data.error || 'Failed to save sub-tasks');
+                }
+            } catch (error) {
+                console.error('Error saving sub-tasks:', error);
+                showToast('Failed to save sub-tasks: ' + error.message, 'error');
+            }
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text || '';
+            return div.innerHTML;
+        }
+
+        // Close modal on overlay click
+        document.getElementById('subtask-modal').addEventListener('click', (e) => {
+            if (e.target.id === 'subtask-modal') {
+                closeModal();
+            }
+        });
+
+        // Close modal on Escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeModal();
+            }
+        });
+    </script>
+</body>
+
+</html>

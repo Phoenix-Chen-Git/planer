@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Summarize My Day - Daily Planner</title>
+    <link rel="stylesheet" href="/static/index.css">
+</head>
+
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-content">
+            <a href="/" class="logo">📅 Daily Planner</a>
+            <nav class="nav">
+                <a href="/" class="nav-link">Dashboard</a>
+                <a href="/plan" class="nav-link">Plan</a>
+                <a href="/tasks" class="nav-link">Tasks</a>
+                <a href="/todos" class="nav-link">To-Dos</a>
+                <a href="/history" class="nav-link">History</a>
+                <a href="/feedback" class="nav-link">Feedback</a>
+                <a href="/summary" class="nav-link active">Summary</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        <h1 style="margin-bottom: var(--space-lg);">🌙 Summarize My Day</h1>
+
+        <!-- Date Selector -->
+        <div class="card fade-in" style="margin-bottom: var(--space-lg);">
+            <div style="display: flex; align-items: center; gap: var(--space-md); flex-wrap: wrap;">
+                <span>Summarizing:</span>
+                <select id="date-selector" class="form-select" style="width: auto;" onchange="changeDate()">
+                    <option value="today">Today</option>
+                    <option value="yesterday">Yesterday</option>
+                </select>
+                <span id="summary-date" style="color: var(--text-muted);"></span>
+            </div>
+        </div>
+
+        <!-- No Plan Info -->
+        <div id="no-plan-info" class="alert alert-info fade-in" style="display: none;">
+            <span>ℹ️</span>
+            <div>
+                <strong id="no-plan-message">No plan found for this day</strong><br>
+                <span>You can still write a summary or reflection.</span>
+            </div>
+        </div>
+
+        <!-- Task Review -->
+        <div id="task-review" class="card fade-in" style="margin-bottom: var(--space-lg);">
+            <div class="card-header">
+                <h2 class="card-title">📋 Review Tasks</h2>
+            </div>
+            <div id="review-list"></div>
+        </div>
+
+        <!-- Summary Form -->
+        <div id="summary-form" class="card fade-in">
+            <div class="card-header">
+                <h2 class="card-title">📝 Day Summary</h2>
+            </div>
+
+            <!-- AI Summary -->
+            <div class="form-group">
+                <label class="form-label">🤖 AI-Generated Summary</label>
+                <button class="btn btn-secondary" onclick="generateAISummary()" id="ai-btn">
+                    Generate with AI
+                </button>
+                <textarea id="ai-summary" class="form-textarea"
+                    placeholder="AI will generate a summary based on your task reviews..."
+                    style="margin-top: var(--space-sm);"></textarea>
+            </div>
+
+            <!-- Personal Reflection -->
+            <div class="form-group">
+                <label class="form-label">💭 Personal Reflection (optional)</label>
+                <textarea id="reflection" class="form-textarea"
+                    placeholder="What did you learn? What would you do differently?"></textarea>
+            </div>
+
+            <!-- Save -->
+            <button class="btn btn-primary btn-lg btn-block" onclick="saveSummary()">
+                💾 Save Summary
+            </button>
+
+            <p style="text-align: center; margin-top: var(--space-md); color: var(--text-muted); font-size: 0.875rem;">
+                This summary will be shown when planning the next day.
+            </p>
+        </div>
+    </main>
+
+    <div class="toast-container" id="toast-container"></div>
+
+    <script>
+        let currentPlan = null;
+        let jobReviews = [];
+        let selectedDate = 'today';
+        let targetDateStr = '';
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            await loadData();
+        });
+
+        function getDateStr(offset = 0) {
+            const d = new Date();
+            d.setDate(d.getDate() + offset);
+            return d.toISOString().split('T')[0];
+        }
+
+        function getFormattedDate(offset = 0) {
+            const d = new Date();
+            d.setDate(d.getDate() + offset);
+            return d.toLocaleDateString('en-US', {
+                weekday: 'long', month: 'long', day: 'numeric', year: 'numeric'
+            });
+        }
+
+        async function changeDate() {
+            selectedDate = document.getElementById('date-selector').value;
+            await loadData();
+        }
+
+        async function loadData() {
+            const offset = selectedDate === 'yesterday' ? -1 : 0;
+            targetDateStr = getDateStr(offset);
+            document.getElementById('summary-date').textContent = getFormattedDate(offset);
+
+            // Load plan for target date
+            try {
+                const planResp = await fetch(`/api/plan/${targetDateStr}`);
+                const planData = await planResp.json();
+                currentPlan = planData.plan;
+
+                if (!currentPlan || !currentPlan.jobs || currentPlan.jobs.length === 0) {
+                    document.getElementById('no-plan-info').style.display = 'flex';
+                    document.getElementById('no-plan-message').textContent =
+                        `No plan found for ${selectedDate === 'yesterday' ? 'yesterday' : 'today'}`;
+                    document.getElementById('task-review').style.display = 'none';
+                    document.getElementById('ai-btn').style.display = 'none';
+                    jobReviews = [];
+                } else {
+                    document.getElementById('no-plan-info').style.display = 'none';
+                    document.getElementById('task-review').style.display = 'block';
+                    document.getElementById('ai-btn').style.display = 'inline-flex';
+
+                    const completionStatus = currentPlan.completion_status || {};
+                    jobReviews = currentPlan.jobs.map((job, idx) => ({
+                        name: job.name,
+                        description: job.user_input || job.description,
+                        completion_status: completionStatus[idx] || 'pending',
+                        notes: ''
+                    }));
+                    renderReviewList();
+                }
+            } catch (error) {
+                console.error('Failed to load plan:', error);
+            }
+
+            // Load existing summary
+            try {
+                const summaryResp = await fetch(`/api/summary/${targetDateStr}`);
+                const summaryData = await summaryResp.json();
+
+                if (summaryData.log) {
+                    document.getElementById('ai-summary').value =
+                        summaryData.log.summary || summaryData.log.ai_generated_summary || '';
+                    document.getElementById('reflection').value = summaryData.log.reflection || '';
+
+                    if (summaryData.log.job_reviews && summaryData.log.job_reviews.length > 0) {
+                        jobReviews = summaryData.log.job_reviews;
+                        if (jobReviews.length > 0) {
+                            document.getElementById('task-review').style.display = 'block';
+                            renderReviewList();
+                        }
+                    }
+                } else {
+                    document.getElementById('ai-summary').value = '';
+                    document.getElementById('reflection').value = '';
+                }
+            } catch (error) {
+                console.error('Failed to load summary:', error);
+            }
+        }
+
+        function renderReviewList() {
+            const container = document.getElementById('review-list');
+
+            if (jobReviews.length === 0) {
+                container.innerHTML = '<p style="color: var(--text-muted); padding: var(--space-md);">No tasks to review.</p>';
+                return;
+            }
+
+            container.innerHTML = jobReviews.map((job, idx) => `
+                <div class="task-item" style="flex-wrap: wrap;">
+                    <div style="display: flex; align-items: center; gap: var(--space-md); flex: 1; min-width: 200px;">
+                        <div class="task-content">
+                            <div class="task-name">${escapeHtml(job.name)}</div>
+                            <div class="task-description">${escapeHtml(job.description || '')}</div>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: var(--space-sm); flex-wrap: wrap;">
+                        <button class="btn ${job.completion_status === 'done' ? 'btn-success' : 'btn-secondary'}" 
+                                onclick="setStatus(${idx}, 'done')">✅ Done</button>
+                        <button class="btn ${job.completion_status === 'pending' ? 'btn-primary' : 'btn-secondary'}" 
+                                onclick="setStatus(${idx}, 'pending')">⏳ Pending</button>
+                        <button class="btn ${job.completion_status === 'quit' ? 'btn-danger' : 'btn-secondary'}" 
+                                onclick="setStatus(${idx}, 'quit')">✕ Quit</button>
+                    </div>
+                    <div style="width: 100%; margin-top: var(--space-sm);">
+                        <input type="text" class="form-input" placeholder="Notes (optional)"
+                               value="${escapeHtml(job.notes || '')}"
+                               onchange="setNotes(${idx}, this.value)">
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function setStatus(idx, status) {
+            jobReviews[idx].completion_status = status;
+            renderReviewList();
+        }
+
+        function setNotes(idx, notes) {
+            jobReviews[idx].notes = notes;
+        }
+
+        async function generateAISummary() {
+            const btn = document.getElementById('ai-btn');
+            btn.textContent = 'Generating...';
+            btn.disabled = true;
+
+            try {
+                const response = await fetch('/api/ai/summary', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ job_reviews: jobReviews })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    document.getElementById('ai-summary').value = data.content;
+                    showToast('AI summary generated!');
+                } else {
+                    showToast(data.error || 'AI failed', 'error');
+                }
+            } catch (error) {
+                showToast('Failed to generate summary', 'error');
+            }
+
+            btn.textContent = 'Generate with AI';
+            btn.disabled = false;
+        }
+
+        async function saveSummary() {
+            try {
+                const response = await fetch('/api/summary', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        date: targetDateStr,
+                        job_reviews: jobReviews,
+                        summary: document.getElementById('ai-summary').value,
+                        reflection: document.getElementById('reflection').value
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showToast('✅ Summary saved!');
+                    setTimeout(() => window.location.href = '/', 1500);
+                } else {
+                    showToast(data.error || 'Save failed', 'error');
+                }
+            } catch (error) {
+                showToast('Failed to save summary', 'error');
+            }
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text || '';
+            return div.innerHTML;
+        }
+    </script>
+</body>
+
+</html>
