@@ -29,7 +29,8 @@ def load_goals() -> Dict:
     """
     if GOALS_FILE.exists():
         with open(GOALS_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            data = json.load(f)
+            return migrate_goals_data(data)
     return {"goals": [], "archived": []}
 
 
@@ -42,6 +43,133 @@ def save_goals(goals_data: Dict):
     GOALS_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(GOALS_FILE, 'w', encoding='utf-8') as f:
         json.dump(goals_data, f, indent=2, ensure_ascii=False)
+
+
+def calculate_time_progress(created_at: str, deadline: str) -> int:
+    """Calculate progress percentage based on elapsed time.
+    
+    Args:
+        created_at: ISO format creation date
+        deadline: YYYY-MM-DD format deadline
+        
+    Returns:
+        Progress percentage (0-100)
+    """
+    try:
+        start = datetime.fromisoformat(created_at)
+        end = datetime.strptime(deadline, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+        now = datetime.now()
+        
+        if now >= end:
+            return 100
+        if now <= start:
+            return 0
+            
+        total_duration = (end - start).total_seconds()
+        elapsed = (now - start).total_seconds()
+        
+        if total_duration <= 0:
+            return 100
+            
+        progress = int((elapsed / total_duration) * 100)
+        return min(max(progress, 0), 100)
+    except (ValueError, TypeError):
+        return 0
+
+
+def get_goal_by_id(goals_data: Dict, goal_id: str) -> Optional[Dict]:
+    """Find a goal or sub-goal by hierarchical ID.
+    
+    Args:
+        goals_data: Goals dictionary
+        goal_id: Hierarchical ID like "1", "1.1", or "1.1.2"
+        
+    Returns:
+        Goal dictionary or None if not found
+    """
+    parts = str(goal_id).split(".")
+    
+    # Find top-level goal
+    goals = goals_data.get("goals", [])
+    current = None
+    
+    for goal in goals:
+        if str(goal.get("id")) == parts[0]:
+            current = goal
+            break
+    
+    if not current or len(parts) == 1:
+        return current
+    
+    # Navigate through sub-goals
+    for part in parts[1:]:
+        sub_goals = current.get("sub_goals", [])
+        found = None
+        for sub in sub_goals:
+            sub_id = str(sub.get("id", "")).split(".")[-1]
+            if sub_id == part:
+                found = sub
+                break
+        if not found:
+            return None
+        current = found
+    
+    return current
+
+
+def generate_sub_goal_id(parent_id: str, sub_goals: List) -> str:
+    """Generate a new sub-goal ID.
+    
+    Args:
+        parent_id: Parent goal ID
+        sub_goals: List of existing sub-goals
+        
+    Returns:
+        New sub-goal ID like "1.1" or "1.2"
+    """
+    existing_nums = []
+    for sub in sub_goals:
+        sub_id = str(sub.get("id", ""))
+        if "." in sub_id:
+            last_part = sub_id.split(".")[-1]
+            if last_part.isdigit():
+                existing_nums.append(int(last_part))
+    
+    next_num = max(existing_nums, default=0) + 1
+    return f"{parent_id}.{next_num}"
+
+
+def migrate_goals_data(goals_data: Dict) -> Dict:
+    """Migrate old goal data format to new format with sub_goals support.
+    
+    Args:
+        goals_data: Goals dictionary to migrate
+        
+    Returns:
+        Migrated goals dictionary
+    """
+    migrated = False
+    
+    for goal in goals_data.get("goals", []):
+        # Ensure created_at exists
+        if "created_at" not in goal:
+            goal["created_at"] = datetime.now().isoformat()
+            migrated = True
+        
+        # Ensure sub_goals list exists
+        if "sub_goals" not in goal:
+            goal["sub_goals"] = []
+            migrated = True
+        
+        # Ensure deadline field (optional, can be None)
+        if "deadline" not in goal:
+            goal["deadline"] = None
+            migrated = True
+    
+    if migrated:
+        save_goals(goals_data)
+    
+    return goals_data
 
 
 def get_stage_info(progress: int) -> Tuple[str, str, str]:
@@ -118,6 +246,28 @@ def add_goal(console: Console) -> bool:
     if not priority:
         return False
     
+    # Deadline (optional)
+    console.print("\n[bold]Set a deadline for this goal:[/bold]")
+    console.print("[dim]Leave empty for no deadline. Format: YYYY-MM-DD[/dim]\n")
+    
+    deadline = questionary.text(
+        "📅 Deadline (YYYY-MM-DD or empty):",
+        validate=lambda x: x == "" or len(x.split("-")) == 3 or "Use format YYYY-MM-DD"
+    ).ask()
+    
+    if deadline is None:
+        return False
+    
+    # Validate date format if provided
+    if deadline.strip():
+        try:
+            datetime.strptime(deadline.strip(), "%Y-%m-%d")
+        except ValueError:
+            console.print("[red]Invalid date format. Using no deadline.[/red]")
+            deadline = None
+    else:
+        deadline = None
+    
     console.print("\n[bold]Define what each stage means for this goal:[/bold]\n")
     
     # Stage descriptions
@@ -157,8 +307,10 @@ def add_goal(console: Console) -> bool:
         "type": goal_type,
         "priority": priority,
         "created_at": datetime.now().isoformat(),
+        "deadline": deadline.strip() if deadline else None,
         "status": "active",
         "progress": 0,
+        "sub_goals": [],
         "stages": {
             "positive": positive_desc.strip(),
             "negative": negative_desc.strip(),
@@ -170,10 +322,127 @@ def add_goal(console: Console) -> bool:
     goals_data["goals"].append(new_goal)
     save_goals(goals_data)
     
-    console.print(f"\n[bold green]✅ Goal '{name}' added successfully![/bold green]")
+    deadline_msg = f" with deadline {deadline}" if deadline else ""
+    console.print(f"\n[bold green]✅ Goal '{name}' added successfully{deadline_msg}![/bold green]")
     console.print(f"[dim]Starting at 🌱 Positive stage (0%)[/dim]")
     return True
 
+
+def add_sub_goal(console: Console, parent_goal_id: str = None) -> bool:
+    """Add a sub-goal to an existing goal.
+    
+    Args:
+        console: Rich console
+        parent_goal_id: Optional parent goal ID to skip selection
+    
+    Returns:
+        True if sub-goal was added
+    """
+    import questionary
+    from questionary import Choice
+    
+    goals_data = load_goals()
+    active_goals = [g for g in goals_data["goals"] if g.get("status") == "active"]
+    
+    if not active_goals:
+        console.print("\n[yellow]No active goals to add sub-goals to.[/yellow]")
+        return False
+    
+    console.print("\n[bold cyan]➕ Add Sub-Goal[/bold cyan]\n")
+    
+    # Select parent goal if not provided
+    if not parent_goal_id:
+        def build_goal_choices(goals, prefix=""):
+            choices = []
+            for g in goals:
+                goal_id = str(g.get("id", ""))
+                name = g.get("name", "Unknown")
+                choices.append(Choice(f"{prefix}{get_priority_emoji(g.get('priority', 'low'))} {name}", value=goal_id))
+                # Add sub-goals with indentation
+                for sub in g.get("sub_goals", []):
+                    sub_id = str(sub.get("id", ""))
+                    sub_name = sub.get("name", "Unknown")
+                    choices.append(Choice(f"{prefix}  └─ {sub_name}", value=sub_id))
+                    # Third level
+                    for sub_sub in sub.get("sub_goals", []):
+                        sub_sub_id = str(sub_sub.get("id", ""))
+                        sub_sub_name = sub_sub.get("name", "Unknown")
+                        choices.append(Choice(f"{prefix}    └─ {sub_sub_name}", value=sub_sub_id))
+            return choices
+        
+        choices = build_goal_choices(active_goals)
+        choices.append(Choice("❌ Cancel", value=None))
+        
+        parent_goal_id = questionary.select(
+            "Select parent goal:",
+            choices=choices
+        ).ask()
+    
+    if not parent_goal_id:
+        return False
+    
+    # Find the parent goal/sub-goal
+    parent = get_goal_by_id(goals_data, parent_goal_id)
+    if not parent:
+        console.print("[red]Goal not found.[/red]")
+        return False
+    
+    # Check depth limit (max 3 levels)
+    depth = len(str(parent_goal_id).split("."))
+    if depth >= 3:
+        console.print("[red]Maximum nesting depth reached (3 levels).[/red]")
+        return False
+    
+    # Get sub-goal name
+    name = questionary.text(
+        f"Sub-goal name (under '{parent.get('name', 'Unknown')}'):",
+        validate=lambda x: len(x.strip()) > 0 or "Name cannot be empty"
+    ).ask()
+    
+    if not name:
+        return False
+    
+    # Get deadline
+    console.print("\n[dim]Set deadline for this sub-goal (YYYY-MM-DD or empty):[/dim]")
+    deadline = questionary.text(
+        "📅 Deadline:",
+    ).ask()
+    
+    if deadline is None:
+        return False
+    
+    # Validate deadline
+    if deadline.strip():
+        try:
+            datetime.strptime(deadline.strip(), "%Y-%m-%d")
+        except ValueError:
+            console.print("[red]Invalid date format. Using no deadline.[/red]")
+            deadline = None
+    else:
+        deadline = None
+    
+    # Create sub-goal
+    sub_goals = parent.get("sub_goals", [])
+    new_id = generate_sub_goal_id(parent_goal_id, sub_goals)
+    
+    new_sub_goal = {
+        "id": new_id,
+        "name": name.strip(),
+        "created_at": datetime.now().isoformat(),
+        "deadline": deadline.strip() if deadline else None,
+        "status": "active",
+        "sub_goals": []
+    }
+    
+    if "sub_goals" not in parent:
+        parent["sub_goals"] = []
+    parent["sub_goals"].append(new_sub_goal)
+    
+    save_goals(goals_data)
+    
+    deadline_msg = f" with deadline {deadline}" if deadline else ""
+    console.print(f"\n[bold green]✅ Sub-goal '{name}' added successfully{deadline_msg}![/bold green]")
+    return True
 
 def update_goal_progress(console: Console) -> bool:
     """Update progress on a goal.

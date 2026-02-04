@@ -158,6 +158,199 @@ def feedback_page():
     return render_template('feedback.html')
 
 
+@app.route('/goals')
+def goals_page():
+    """Render goals page."""
+    return render_template('goals.html')
+
+
+# ============ Goals API ============
+
+from calendar_view import (
+    load_goals, save_goals, calculate_time_progress, 
+    get_goal_by_id, generate_sub_goal_id, migrate_goals_data
+)
+
+
+@app.route('/api/goals')
+def api_get_goals():
+    """Get all goals with hierarchy and calculated progress."""
+    goals_data = load_goals()
+    
+    def add_time_progress(goal_or_sub):
+        """Add calculated time progress to goal/sub-goal."""
+        created = goal_or_sub.get('created_at')
+        deadline = goal_or_sub.get('deadline')
+        
+        if created and deadline:
+            goal_or_sub['time_progress'] = calculate_time_progress(created, deadline)
+            # Calculate days remaining
+            try:
+                from datetime import datetime
+                deadline_date = datetime.strptime(deadline, "%Y-%m-%d")
+                days_remaining = (deadline_date - datetime.now()).days
+                goal_or_sub['days_remaining'] = days_remaining
+            except:
+                goal_or_sub['days_remaining'] = None
+        else:
+            goal_or_sub['time_progress'] = goal_or_sub.get('progress', 0)
+            goal_or_sub['days_remaining'] = None
+        
+        # Recursively process sub-goals
+        for sub in goal_or_sub.get('sub_goals', []):
+            add_time_progress(sub)
+    
+    for goal in goals_data.get('goals', []):
+        add_time_progress(goal)
+    
+    return jsonify(goals_data)
+
+
+@app.route('/api/goals', methods=['POST'])
+def api_add_goal():
+    """Create a new goal."""
+    data = request.json
+    name = data.get('name', '').strip()
+    
+    if not name:
+        return jsonify({'success': False, 'error': 'Name required'}), 400
+    
+    goals_data = load_goals()
+    
+    new_goal = {
+        'id': len(goals_data['goals']) + len(goals_data.get('archived', [])) + 1,
+        'name': name,
+        'type': data.get('type', 'long_term'),
+        'priority': data.get('priority', 'medium'),
+        'created_at': datetime.now().isoformat(),
+        'deadline': data.get('deadline'),
+        'status': 'active',
+        'progress': 0,
+        'sub_goals': [],
+        'stages': data.get('stages', {
+            'positive': 'Starting with good intentions',
+            'negative': 'Facing challenges',
+            'current': 'Making progress',
+            'improve': 'Building momentum'
+        })
+    }
+    
+    goals_data['goals'].append(new_goal)
+    save_goals(goals_data)
+    
+    return jsonify({'success': True, 'goal': new_goal})
+
+
+@app.route('/api/goals/<goal_id>', methods=['PUT'])
+def api_update_goal(goal_id: str):
+    """Update a goal or sub-goal."""
+    data = request.json
+    goals_data = load_goals()
+    
+    goal = get_goal_by_id(goals_data, goal_id)
+    if not goal:
+        return jsonify({'success': False, 'error': 'Goal not found'}), 404
+    
+    # Update allowed fields
+    if 'name' in data:
+        goal['name'] = data['name']
+    if 'deadline' in data:
+        goal['deadline'] = data['deadline'] if data['deadline'] else None
+    if 'priority' in data:
+        goal['priority'] = data['priority']
+    if 'status' in data:
+        goal['status'] = data['status']
+        if data['status'] == 'completed':
+            goal['completed_at'] = datetime.now().isoformat()
+    
+    save_goals(goals_data)
+    return jsonify({'success': True, 'goal': goal})
+
+
+@app.route('/api/goals/<goal_id>', methods=['DELETE'])
+def api_delete_goal(goal_id: str):
+    """Delete a goal or sub-goal."""
+    goals_data = load_goals()
+    
+    # Check if it's a top-level goal
+    parts = str(goal_id).split('.')
+    if len(parts) == 1:
+        # Top-level goal
+        goals_data['goals'] = [g for g in goals_data['goals'] if str(g.get('id')) != goal_id]
+    else:
+        # Sub-goal - find parent and remove from sub_goals
+        parent_id = '.'.join(parts[:-1])
+        parent = get_goal_by_id(goals_data, parent_id)
+        if parent:
+            parent['sub_goals'] = [s for s in parent.get('sub_goals', []) if str(s.get('id')) != goal_id]
+    
+    save_goals(goals_data)
+    return jsonify({'success': True})
+
+
+@app.route('/api/goals/<parent_id>/subgoals', methods=['POST'])
+def api_add_subgoal(parent_id: str):
+    """Add a sub-goal to an existing goal."""
+    data = request.json
+    name = data.get('name', '').strip()
+    
+    if not name:
+        return jsonify({'success': False, 'error': 'Name required'}), 400
+    
+    goals_data = load_goals()
+    parent = get_goal_by_id(goals_data, parent_id)
+    
+    if not parent:
+        return jsonify({'success': False, 'error': 'Parent goal not found'}), 404
+    
+    # Check depth limit
+    depth = len(str(parent_id).split('.'))
+    if depth >= 3:
+        return jsonify({'success': False, 'error': 'Maximum nesting depth (3 levels) reached'}), 400
+    
+    if 'sub_goals' not in parent:
+        parent['sub_goals'] = []
+    
+    new_id = generate_sub_goal_id(parent_id, parent['sub_goals'])
+    
+    new_subgoal = {
+        'id': new_id,
+        'name': name,
+        'created_at': datetime.now().isoformat(),
+        'deadline': data.get('deadline'),
+        'status': 'active',
+        'sub_goals': []
+    }
+    
+    parent['sub_goals'].append(new_subgoal)
+    save_goals(goals_data)
+    
+    return jsonify({'success': True, 'subgoal': new_subgoal})
+
+
+@app.route('/api/goals/<goal_id>/status', methods=['PUT'])
+def api_update_goal_status(goal_id: str):
+    """Update goal status (active/completed/archived)."""
+    data = request.json
+    status = data.get('status')
+    
+    if status not in ['active', 'completed', 'archived']:
+        return jsonify({'success': False, 'error': 'Invalid status'}), 400
+    
+    goals_data = load_goals()
+    goal = get_goal_by_id(goals_data, goal_id)
+    
+    if not goal:
+        return jsonify({'success': False, 'error': 'Goal not found'}), 404
+    
+    goal['status'] = status
+    if status == 'completed':
+        goal['completed_at'] = datetime.now().isoformat()
+    
+    save_goals(goals_data)
+    return jsonify({'success': True})
+
+
 @app.route('/api/feedback')
 def api_get_feedback():
     """Get all feedback entries."""
