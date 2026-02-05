@@ -140,10 +140,7 @@ def tasks_page():
     return render_template('tasks.html')
 
 
-@app.route('/todos')
-def todos_page():
-    """Render to-dos page."""
-    return render_template('todos.html')
+
 
 
 @app.route('/history')
@@ -162,6 +159,35 @@ def feedback_page():
 def goals_page():
     """Render goals page."""
     return render_template('goals.html')
+
+
+@app.route('/radar')
+def radar_page():
+    """Render radar page."""
+    return render_template('radar.html')
+
+
+# ============ Radar API ============
+
+@app.route('/api/radar')
+def api_get_radar():
+    """Get radar data."""
+    return jsonify(storage.load_radar())
+
+
+@app.route('/api/radar', methods=['POST'])
+def api_save_radar():
+    """Save radar data."""
+    data = request.json
+    storage.save_radar(data)
+    return jsonify({'success': True})
+
+
+@app.route('/api/radar/checkpoint', methods=['POST'])
+def api_save_radar_checkpoint():
+    """Save radar checkpoint."""
+    checkpoint = storage.save_radar_checkpoint()
+    return jsonify({'success': True, 'checkpoint': checkpoint})
 
 
 # ============ Goals API ============
@@ -377,8 +403,8 @@ def api_add_feedback():
     return jsonify({'success': True, 'feedback': feedback_entry})
 
 
-@app.route('/api/feedback/<int:idx>/status', methods=['POST'])
-def api_update_feedback_status(idx: int):
+@app.route('/api/feedback/<feedback_id>/status', methods=['POST'])
+def api_update_feedback_status(feedback_id: str):
     """Update feedback status."""
     data = request.json
     status = data.get('status', 'pending')
@@ -386,28 +412,22 @@ def api_update_feedback_status(idx: int):
     if status not in ['pending', 'implemented', 'dismissed']:
         return jsonify({'success': False, 'error': 'Invalid status'}), 400
     
-    storage.update_feedback_status(idx, status)
-    return jsonify({'success': True})
+    success = storage.update_feedback_status(feedback_id, status)
+    if success:
+        return jsonify({'success': True})
+    else:
+        return jsonify({'success': False, 'error': 'Feedback not found'}), 404
 
 
-@app.route('/api/feedback/<int:idx>', methods=['DELETE'])
-def api_delete_feedback(idx: int):
+@app.route('/api/feedback/<feedback_id>', methods=['DELETE'])
+def api_delete_feedback(feedback_id: str):
     """Delete a feedback entry."""
-    feedback_data = storage.load_all_feedback()
-    entries = feedback_data.get('feedback_entries', [])
+    deleted = storage.delete_feedback(feedback_id)
     
-    if idx < 0 or idx >= len(entries):
-        return jsonify({'success': False, 'error': 'Invalid index'}), 400
-    
-    deleted = entries.pop(idx)
-    
-    # Save updated feedback
-    feedback_path = storage.get_feedback_path()
-    import json
-    with open(feedback_path, 'w', encoding='utf-8') as f:
-        json.dump(feedback_data, f, indent=2, ensure_ascii=False)
-    
-    return jsonify({'success': True, 'deleted': deleted.get('original_feedback', '')[:50]})
+    if deleted:
+        return jsonify({'success': True, 'deleted': deleted.get('original_feedback', '')[:50]})
+    else:
+        return jsonify({'success': False, 'error': 'Feedback not found'}), 404
 
 
 @app.route('/api/history/<int:year>/<int:month>')
@@ -437,74 +457,7 @@ def api_history(year: int, month: int):
     return jsonify({'entries': entries})
 
 
-@app.route('/api/todos')
-def api_get_todos():
-    """Get all to-dos."""
-    todos_data = storage.load_todos()
-    return jsonify(todos_data)
 
-
-@app.route('/api/todos', methods=['POST'])
-def api_add_todo():
-    """Add a new to-do."""
-    data = request.json
-    title = data.get('title', '').strip()
-    deadline = data.get('deadline')
-    
-    if not title:
-        return jsonify({'success': False, 'error': 'Title required'}), 400
-    
-    if not deadline:
-        return jsonify({'success': False, 'error': 'Deadline required'}), 400
-    
-    todos_data = storage.load_todos()
-    
-    new_todo = {
-        'id': len(todos_data['todos']),
-        'title': title,
-        'deadline': deadline,
-        'completed': False,
-        'created_at': datetime.now().isoformat()
-    }
-    
-    todos_data['todos'].append(new_todo)
-    storage.save_todos(todos_data)
-    
-    return jsonify({'success': True, 'todo': new_todo})
-
-
-@app.route('/api/todos/<int:idx>/toggle', methods=['POST'])
-def api_toggle_todo(idx: int):
-    """Toggle to-do completion status."""
-    todos_data = storage.load_todos()
-    todos = todos_data.get('todos', [])
-    
-    if idx < 0 or idx >= len(todos):
-        return jsonify({'success': False, 'error': 'Invalid index'}), 400
-    
-    todos[idx]['completed'] = not todos[idx].get('completed', False)
-    if todos[idx]['completed']:
-        todos[idx]['completed_at'] = datetime.now().isoformat()
-    else:
-        todos[idx].pop('completed_at', None)
-    
-    storage.save_todos(todos_data)
-    return jsonify({'success': True, 'completed': todos[idx]['completed']})
-
-
-@app.route('/api/todos/<int:idx>', methods=['DELETE'])
-def api_delete_todo(idx: int):
-    """Delete a to-do."""
-    todos_data = storage.load_todos()
-    todos = todos_data.get('todos', [])
-    
-    if idx < 0 or idx >= len(todos):
-        return jsonify({'success': False, 'error': 'Invalid index'}), 400
-    
-    deleted = todos.pop(idx)
-    storage.save_todos(todos_data)
-    
-    return jsonify({'success': True, 'deleted': deleted['title']})
 
 
 @app.route('/api/today')

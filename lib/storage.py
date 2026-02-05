@@ -150,38 +150,88 @@ class Storage:
         """
         return self.get_plan_path(date).exists()
     
-    def get_todos_path(self) -> Path:
-        """Get path for to-dos file.
+
+    
+    def get_radar_path(self) -> Path:
+        """Get path for personal radar data file.
         
         Returns:
-            Path to todos.json
+            Path to radar.json
         """
-        return self.data_dir / "todos.json"
-    
-    def load_todos(self) -> Dict[str, Any]:
-        """Load all to-dos.
+        return self.data_dir / "radar.json"
+        
+    def load_radar(self) -> Dict[str, Any]:
+        """Load personal radar data.
         
         Returns:
-            Dictionary containing to-dos list
+            Dictionary containing 'current' (abilities) and 'history' (checkpoints)
         """
-        todos_path = self.get_todos_path()
+        radar_path = self.get_radar_path()
         
-        if not todos_path.exists():
-            return {'todos': []}
-        
-        with open(todos_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    
-    def save_todos(self, todos_data: Dict[str, Any]) -> None:
-        """Save to-dos data.
+        if not radar_path.exists():
+            return {'current': {'abilities': []}, 'history': []}
+            
+        with open(radar_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            
+        # Migration: If it's the old format (directly has "abilities"), nest it under "current"
+        if "abilities" in data and "current" not in data:
+            data = {
+                "current": {"abilities": data["abilities"]},
+                "history": []
+            }
+            # Save migrated structure
+            with open(radar_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+                
+        return data
+            
+    def save_radar(self, radar_data: Dict[str, Any]) -> None:
+        """Save personal radar data (current state).
         
         Args:
-            todos_data: Dictionary containing to-dos list
+            radar_data: Dictionary containing 'current' state (abilities)
         """
-        todos_path = self.get_todos_path()
-        with open(todos_path, 'w', encoding='utf-8') as f:
-            json.dump(todos_data, f, indent=2, ensure_ascii=False)
-    
+        radar_path = self.get_radar_path()
+        
+        # Load existing to preserve history
+        existing = self.load_radar()
+        
+        # Update current state
+        # Support both full structure or just the 'abilities' wrapper
+        if "abilities" in radar_data:
+             existing['current'] = radar_data
+        elif "current" in radar_data:
+             existing['current'] = radar_data['current']
+        
+        with open(radar_path, 'w', encoding='utf-8') as f:
+            json.dump(existing, f, indent=2, ensure_ascii=False)
+            
+    def save_radar_checkpoint(self) -> Dict[str, Any]:
+        """Save the current radar state as a history checkpoint.
+        
+        Returns:
+            The created checkpoint object
+        """
+        data = self.load_radar()
+        current = data.get('current', {})
+        
+        checkpoint = {
+            "date": datetime.now().isoformat(),
+            "abilities": current.get('abilities', [])
+        }
+        
+        if 'history' not in data:
+            data['history'] = []
+            
+        data['history'].append(checkpoint)
+        
+        radar_path = self.get_radar_path()
+        with open(radar_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            
+        return checkpoint
+
     def get_feedback_path(self) -> Path:
         """Get path for centralized feedback file.
         
@@ -190,27 +240,7 @@ class Storage:
         """
         return self.data_dir / "tool_feedback.json"
     
-    def save_feedback(self, feedback_entry: Dict[str, Any]) -> None:
-        """Save feedback entry to centralized storage.
-        
-        Args:
-            feedback_entry: Feedback entry with date, original_feedback, final_understanding, etc.
-        """
-        feedback_path = self.get_feedback_path()
-        
-        # Load existing feedback or create new structure
-        if feedback_path.exists():
-            with open(feedback_path, 'r', encoding='utf-8') as f:
-                feedback_data = json.load(f)
-        else:
-            feedback_data = {'feedback_entries': []}
-        
-        # Add new entry
-        feedback_data['feedback_entries'].append(feedback_entry)
-        
-        # Save back
-        with open(feedback_path, 'w', encoding='utf-8') as f:
-            json.dump(feedback_data, f, indent=2, ensure_ascii=False)
+
     
     def load_all_feedback(self) -> Dict[str, Any]:
         """Load all feedback entries.
@@ -224,23 +254,100 @@ class Storage:
             return {'feedback_entries': []}
         
         with open(feedback_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    
-    def update_feedback_status(self, index: int, status: str) -> None:
-        """Update status of a feedback entry.
+            data = json.load(f)
+            
+        # Migration: Ensure all entries have IDs
+        modified = False
+        import uuid
+        for entry in data.get('feedback_entries', []):
+            if 'id' not in entry:
+                entry['id'] = str(uuid.uuid4())[:8]
+                modified = True
+        
+        if modified:
+            with open(feedback_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+                
+        return data
+        
+    def save_feedback(self, feedback_entry: Dict[str, Any]) -> None:
+        """Save a new feedback entry.
         
         Args:
-            index: Index of feedback entry to update
+            feedback_entry: Feedback entry to save
+        """
+        import uuid
+        if 'id' not in feedback_entry:
+            feedback_entry['id'] = str(uuid.uuid4())[:8]
+            
+        feedback_data = self.load_all_feedback()
+        if 'feedback_entries' not in feedback_data:
+            feedback_data['feedback_entries'] = []
+            
+        feedback_data['feedback_entries'].append(feedback_entry)
+        
+        feedback_path = self.get_feedback_path()
+        with open(feedback_path, 'w', encoding='utf-8') as f:
+            json.dump(feedback_data, f, indent=2, ensure_ascii=False)
+    
+    def update_feedback_status(self, feedback_id: str, status: str) -> bool:
+        """Update status of a feedback entry by ID.
+        
+        Args:
+            feedback_id: ID of feedback entry to update
             status: New status ('pending', 'implemented', 'dismissed')
+            
+        Returns:
+            True if found and updated, False otherwise
         """
         feedback_data = self.load_all_feedback()
+        entries = feedback_data.get('feedback_entries', [])
         
-        if 0 <= index < len(feedback_data['feedback_entries']):
-            feedback_data['feedback_entries'][index]['status'] = status
-            
+        # Find by ID
+        target = None
+        for entry in entries:
+            if str(entry.get('id')) == str(feedback_id):
+                target = entry
+                break
+        
+        # Fallback for old index-based calls (if any remain) (actually better to fail or handle upstream)
+        # But let's assume we strictly use IDs now
+        
+        if target:
+            target['status'] = status
             feedback_path = self.get_feedback_path()
             with open(feedback_path, 'w', encoding='utf-8') as f:
                 json.dump(feedback_data, f, indent=2, ensure_ascii=False)
+            return True
+            
+        return False
+        
+    def delete_feedback(self, feedback_id: str) -> Optional[Dict]:
+        """Delete a feedback entry by ID.
+        
+        Args:
+            feedback_id: ID to delete
+            
+        Returns:
+            Deleted entry or None if not found
+        """
+        feedback_data = self.load_all_feedback()
+        entries = feedback_data.get('feedback_entries', [])
+        
+        target_idx = -1
+        for i, entry in enumerate(entries):
+            if str(entry.get('id')) == str(feedback_id):
+                target_idx = i
+                break
+        
+        if target_idx >= 0:
+            deleted = entries.pop(target_idx)
+            feedback_path = self.get_feedback_path()
+            with open(feedback_path, 'w', encoding='utf-8') as f:
+                json.dump(feedback_data, f, indent=2, ensure_ascii=False)
+            return deleted
+            
+        return None
     
     def get_improves_path(self) -> Path:
         """Get path for archived/implemented feedback directory.

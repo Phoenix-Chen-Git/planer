@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Personal Radar - Daily Planner</title>
+    <link rel="stylesheet" href="/static/index.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/moment@2.29.4/moment.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment@1.0.1/dist/chartjs-adapter-moment.min.js"></script>
+    <style>
+        .split-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        @media (max-width: 900px) {
+            .split-container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .chart-card {
+            background: var(--bg-secondary);
+            border-radius: 16px;
+            padding: 1rem;
+            border: 1px solid var(--border);
+            height: 500px;
+            position: relative;
+        }
+
+        .abilities-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+
+        .ability-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .ability-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .ability-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .control-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .control-label {
+            width: 60px;
+            color: var(--text-secondary);
+        }
+
+        .slider-val {
+            width: 25px;
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+
+        input[type="range"] {
+            flex: 1;
+            accent-color: var(--accent-cyan);
+        }
+
+        .btn-icon {
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+        }
+
+        .btn-icon:hover {
+            color: #f85149;
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+    </style>
+</head>
+
+<body>
+    <header class="header">
+        <div class="header-content">
+            <a href="/" class="logo">📅 Daily Planner</a>
+            <nav class="nav">
+                <a href="/" class="nav-link">Dashboard</a>
+                <a href="/plan" class="nav-link">Plan</a>
+                <a href="/tasks" class="nav-link">Tasks</a>
+                <a href="/goals" class="nav-link">Goals</a>
+                <a href="/radar" class="nav-link active">Radar</a>
+                <a href="/history" class="nav-link">History</a>
+                <a href="/feedback" class="nav-link">Feedback</a>
+                <a href="/summary" class="nav-link">Summary</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        <div class="card"
+            style="margin-bottom: var(--space-lg); display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                <h1>🕸️ Personal Radar</h1>
+                <p style="color: var(--text-secondary);">Visualize abilities and track growth over time.</p>
+            </div>
+            <div style="display: flex; gap: 0.5rem;">
+                <button class="btn btn-secondary" onclick="addAbility()">➕ Add Ability</button>
+                <button class="btn btn-primary" onclick="recordCheckpoint()">📍 Record Checkpoint</button>
+            </div>
+        </div>
+
+        <div class="split-container fade-in">
+            <!-- Left Panel: Radar -->
+            <div class="chart-card">
+                <div class="section-header">
+                    <h3>Current Status</h3>
+                </div>
+                <div style="position: relative; height: 90%; width: 100%;">
+                    <canvas id="radarChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Right Panel: History Line -->
+            <div class="chart-card">
+                <div class="section-header">
+                    <h3>History</h3>
+                </div>
+                <div style="position: relative; height: 90%; width: 100%;">
+                    <canvas id="historyChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div id="abilities-list" class="abilities-grid fade-in">
+            <!-- Abilities populated by JS -->
+        </div>
+    </main>
+
+    <div class="toast-container" id="toast-container"></div>
+
+    <script>
+        let radarData = { current: { abilities: [] }, history: [] };
+        let radarChart = null;
+        let historyChart = null;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadRadarData();
+        });
+
+        async function loadRadarData() {
+            try {
+                const res = await fetch('/api/radar');
+                const data = await res.json();
+
+                // Handle different data structures safely
+                if (data.current) {
+                    radarData = data;
+                } else if (data.abilities) {
+                    // Auto-migrate in memory if backend didn't
+                    radarData = { current: { abilities: data.abilities }, history: [] };
+                } else {
+                    // Default
+                    radarData = { current: { abilities: [] }, history: [] };
+                }
+
+                if (!radarData.current.abilities || radarData.current.abilities.length === 0) {
+                    radarData.current.abilities = [
+                        { name: "Focus", value: 5, target: 8 },
+                        { name: "Endurance", value: 3, target: 7 },
+                        { name: "Knowledge", value: 5, target: 9 },
+                        { name: "Creativity", value: 6, target: 8 },
+                        { name: "Discipline", value: 4, target: 8 }
+                    ];
+                    saveRadarData();
+                }
+
+                renderRadarChart();
+                renderHistoryChart();
+                renderControls();
+            } catch (err) {
+                console.error(err);
+                showToast('Failed to load radar data', 'error');
+            }
+        }
+
+        async function recordCheckpoint() {
+            try {
+                const res = await fetch('/api/radar/checkpoint', { method: 'POST' });
+                const json = await res.json();
+
+                if (json.success) {
+                    showToast('📍 Checkpoint recorded!');
+                    // Reload data to get updated history
+                    await loadRadarData();
+                } else {
+                    showToast('Failed to record checkpoint', 'error');
+                }
+            } catch (err) {
+                showToast('Error recording checkpoint', 'error');
+            }
+        }
+
+        async function saveRadarData() {
+            try {
+                await fetch('/api/radar', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(radarData.current)
+                });
+            } catch (err) {
+                showToast('Failed to save data', 'error');
+            }
+        }
+
+        function renderRadarChart() {
+            const ctx = document.getElementById('radarChart').getContext('2d');
+            const abilities = radarData.current.abilities;
+            const labels = abilities.map(a => a.name);
+            const values = abilities.map(a => a.value);
+            const targets = abilities.map(a => a.target);
+            const average = labels.map(() => 5);
+
+            if (radarChart) radarChart.destroy();
+
+            const primaryColor = getComputedStyle(document.body).getPropertyValue('--primary').trim() || '#238636';
+            const accentColor = getComputedStyle(document.body).getPropertyValue('--accent-cyan').trim() || '#58a6ff';
+
+            radarChart = new Chart(ctx, {
+                type: 'radar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Current Level',
+                            data: values,
+                            backgroundColor: 'rgba(35, 134, 54, 0.2)',
+                            borderColor: primaryColor,
+                            pointBackgroundColor: primaryColor,
+                            pointBorderColor: '#fff',
+                            order: 1
+                        },
+                        {
+                            label: 'Target',
+                            data: targets,
+                            backgroundColor: 'transparent',
+                            borderColor: accentColor,
+                            borderDash: [5, 5],
+                            pointBackgroundColor: accentColor,
+                            pointBorderColor: '#fff',
+                            order: 2
+                        },
+                        {
+                            label: 'Average',
+                            data: average,
+                            backgroundColor: 'rgba(128, 128, 128, 0.1)',
+                            borderColor: 'rgba(128, 128, 128, 0.5)',
+                            borderWidth: 1,
+                            pointRadius: 0,
+                            order: 3
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        r: {
+                            min: 0,
+                            max: 10,
+                            beginAtZero: true,
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                            angleLines: { color: 'rgba(255, 255, 255, 0.1)' },
+                            pointLabels: { color: '#c9d1d9', font: { size: 13 } },
+                            ticks: { display: false }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            labels: { color: '#c9d1d9', boxWidth: 12 }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderHistoryChart() {
+            const ctx = document.getElementById('historyChart').getContext('2d');
+
+            // Prepare datasets
+            // Need a dataset for each ability
+            const abilitiesMap = {}; // name -> list of {x: date, y: value}
+
+            // Collect all unique ability names
+            const allNames = new Set();
+
+            // Add history points
+            (radarData.history || []).forEach(checkpoint => {
+                const date = checkpoint.date;
+                (checkpoint.abilities || []).forEach(ab => {
+                    allNames.add(ab.name);
+                    if (!abilitiesMap[ab.name]) abilitiesMap[ab.name] = [];
+                    abilitiesMap[ab.name].push({ x: date, y: ab.value });
+                });
+            });
+
+            // Add current state as the latest point
+            const now = new Date().toISOString();
+            (radarData.current.abilities || []).forEach(ab => {
+                allNames.add(ab.name);
+                if (!abilitiesMap[ab.name]) abilitiesMap[ab.name] = [];
+                abilitiesMap[ab.name].push({ x: now, y: ab.value });
+            });
+
+            // Create chart datasets
+            const colors = [
+                '#58a6ff', '#3fb950', '#d29922', '#f85149', '#a371f7',
+                '#db6d28', '#8b949e', '#f0883e', '#388bfd', '#7ee787'
+            ];
+
+            const datasets = Array.from(allNames).map((name, idx) => ({
+                label: name,
+                data: abilitiesMap[name],
+                borderColor: colors[idx % colors.length],
+                backgroundColor: colors[idx % colors.length],
+                tension: 0.1,
+                pointRadius: 3
+            }));
+
+            if (historyChart) historyChart.destroy();
+
+            historyChart = new Chart(ctx, {
+                type: 'line',
+                data: { datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'day',
+                                displayFormats: { day: 'MMM D' }
+                            },
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                            ticks: { color: '#8b949e' }
+                        },
+                        y: {
+                            min: 0,
+                            max: 10,
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                            ticks: { color: '#8b949e' }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            labels: { color: '#c9d1d9', boxWidth: 12 },
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderControls() {
+            const container = document.getElementById('abilities-list');
+            container.innerHTML = radarData.current.abilities.map((ability, idx) => `
+                <div class="ability-card">
+                    <div class="ability-header">
+                        <input type="text" value="${escapeHtml(ability.name)}" 
+                               class="form-control" 
+                               style="font-weight: bold; width: 120px; padding: 4px;"
+                               onchange="updateName(${idx}, this.value)">
+                        <button class="btn-icon" onclick="removeAbility(${idx})">🗑️</button>
+                    </div>
+                    <div class="ability-controls">
+                        <div class="control-row">
+                            <span class="control-label">Current</span>
+                            <input type="range" min="0" max="10" step="0.5" value="${ability.value}" 
+                                   oninput="updateValue(${idx}, 'value', this.value)">
+                            <span class="slider-val">${ability.value}</span>
+                        </div>
+                        <div class="control-row">
+                            <span class="control-label">Target</span>
+                            <input type="range" min="0" max="10" step="0.5" value="${ability.target}" 
+                                   oninput="updateValue(${idx}, 'target', this.value)">
+                            <span class="slider-val">${ability.target}</span>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function updateName(idx, newName) {
+            radarData.current.abilities[idx].name = newName;
+            updateAll();
+        }
+
+        function updateValue(idx, field, newVal) {
+            radarData.current.abilities[idx][field] = parseFloat(newVal);
+            // Update UI text
+            const cards = document.querySelectorAll('.ability-card');
+            const valSpan = cards[idx].querySelectorAll('.slider-val')[field === 'value' ? 0 : 1];
+            valSpan.textContent = newVal;
+
+            // Only update charts, don't re-render entire DOM to keep slider focus
+            // Update Radar
+            if (field === 'value') radarChart.data.datasets[0].data[idx] = parseFloat(newVal);
+            if (field === 'target') radarChart.data.datasets[1].data[idx] = parseFloat(newVal);
+            radarChart.update();
+
+            // Update History (Last point of current series)
+            if (field === 'value') {
+                const name = radarData.current.abilities[idx].name;
+                // Find dataset for this name
+                const dataset = historyChart.data.datasets.find(d => d.label === name);
+                if (dataset) {
+                    // Update last point
+                    const lastPt = dataset.data[dataset.data.length - 1];
+                    lastPt.y = parseFloat(newVal);
+                    historyChart.update();
+                }
+            }
+
+            saveRadarData();
+        }
+
+        function updateAll() {
+            renderRadarChart();
+            renderHistoryChart(); // Name change requires re-render
+            saveRadarData();
+        }
+
+        function addAbility() {
+            radarData.current.abilities.push({ name: "New Ability", value: 5, target: 8 });
+            renderControls();
+
+            // Re-render both charts to include new dataset
+            renderRadarChart();
+            renderHistoryChart();
+
+            saveRadarData();
+        }
+
+        function removeAbility(idx) {
+            if (!confirm("Remove this ability?")) return;
+            radarData.current.abilities.splice(idx, 1);
+            renderControls();
+            renderRadarChart();
+            renderHistoryChart();
+            saveRadarData();
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.textContent = message;
+            if (type === 'error') toast.style.borderLeftColor = '#f85149';
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text || '';
+            return div.innerHTML;
+        }
+    </script>
+</body>
+
+</html>

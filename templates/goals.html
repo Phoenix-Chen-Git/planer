@@ -228,8 +228,9 @@
                 <a href="/" class="nav-link">Dashboard</a>
                 <a href="/plan" class="nav-link">Plan</a>
                 <a href="/tasks" class="nav-link">Tasks</a>
-                <a href="/todos" class="nav-link">To-Dos</a>
+
                 <a href="/goals" class="nav-link active">Goals</a>
+                <a href="/radar" class="nav-link">Radar</a>
                 <a href="/history" class="nav-link">History</a>
                 <a href="/feedback" class="nav-link">Feedback</a>
                 <a href="/summary" class="nav-link">Summary</a>
@@ -241,10 +242,17 @@
         <div class="card"
             style="margin-bottom: var(--space-lg); display: flex; justify-content: space-between; align-items: center;">
             <div>
-                <h1>🎯 Hierarchical Goals</h1>
-                <p style="color: var(--text-secondary);">Track long-term goals, sub-goals, and deadlines</p>
+                <h1>🎯 Goals & Tasks</h1>
+                <p style="color: var(--text-secondary);">Track long-term goals, projects, and daily tasks</p>
             </div>
-            <button class="btn btn-primary" onclick="openAddGoalModal()">➕ New Top-Level Goal</button>
+            <div style="display: flex; gap: 1rem;">
+                <div class="view-toggle">
+                    <button class="btn btn-secondary active" onclick="setFilter('all')">All</button>
+                    <button class="btn btn-secondary" onclick="setFilter('goals')">Goals</button>
+                    <button class="btn btn-secondary" onclick="setFilter('tasks')">Tasks</button>
+                </div>
+                <button class="btn btn-primary" onclick="openAddGoalModal()">➕ New Goal/Task</button>
+            </div>
         </div>
 
         <div id="goals-container" class="goal-tree">
@@ -278,6 +286,7 @@
                 <div class="form-group" id="type-group">
                     <label for="goal-type">Type</label>
                     <select id="goal-type" class="form-control">
+                        <option value="task">✅ Task (Short-term)</option>
                         <option value="long_term">🎯 Long-term (1+ year)</option>
                         <option value="yearly">📅 Yearly</option>
                         <option value="monthly">📆 Monthly</option>
@@ -311,6 +320,7 @@
 
     <script>
         let allGoals = [];
+        let currentFilter = 'all';
 
         document.addEventListener('DOMContentLoaded', () => {
             loadGoals();
@@ -336,7 +346,15 @@
 
             container.innerHTML = '';
 
-            if (allGoals.length === 0) {
+            // Filter goals
+            let filtered = allGoals;
+            if (currentFilter === 'goals') {
+                filtered = allGoals.filter(g => g.type !== 'task');
+            } else if (currentFilter === 'tasks') {
+                filtered = allGoals.filter(g => g.type === 'task');
+            }
+
+            if (filtered.length === 0) {
                 emptyState.style.display = 'block';
                 return;
             }
@@ -344,11 +362,30 @@
             emptyState.style.display = 'none';
 
             // Sort goals by priority then deadline
-            const sortedGoals = sortGoals(allGoals);
+            const sortedGoals = sortGoals(filtered);
 
             sortedGoals.forEach(goal => {
                 container.appendChild(createGoalNode(goal));
             });
+        }
+
+        function setFilter(filter) {
+            currentFilter = filter;
+
+            // Update buttons
+            document.querySelectorAll('.view-toggle button').forEach(btn => {
+                if (btn.textContent.toLowerCase() === filter) {
+                    btn.classList.add('active');
+                    btn.classList.remove('btn-secondary');
+                    btn.classList.add('btn-primary');
+                } else {
+                    btn.classList.remove('active');
+                    btn.classList.add('btn-secondary');
+                    btn.classList.remove('btn-primary');
+                }
+            });
+
+            renderGoals();
         }
 
         function sortGoals(goals) {
@@ -474,7 +511,7 @@
         // --- Modal & Form Handling ---
 
         function openAddGoalModal() {
-            document.getElementById('modal-title').textContent = 'Add New Top-Level Goal';
+            document.getElementById('modal-title').textContent = 'Add New Goal/Task';
             document.getElementById('goal-form').reset();
             document.getElementById('parent-id').value = '';
             document.getElementById('edit-goal-id').value = '';

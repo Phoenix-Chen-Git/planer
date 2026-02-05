@@ -140,7 +140,7 @@ def generate_sub_goal_id(parent_id: str, sub_goals: List) -> str:
 
 
 def migrate_goals_data(goals_data: Dict) -> Dict:
-    """Migrate old goal data format to new format with sub_goals support.
+    """Migrate old goal data and merge separate to-dos into goals.
     
     Args:
         goals_data: Goals dictionary to migrate
@@ -150,6 +150,7 @@ def migrate_goals_data(goals_data: Dict) -> Dict:
     """
     migrated = False
     
+    # 1. Standard Schema Migration
     for goal in goals_data.get("goals", []):
         # Ensure created_at exists
         if "created_at" not in goal:
@@ -165,6 +166,62 @@ def migrate_goals_data(goals_data: Dict) -> Dict:
         if "deadline" not in goal:
             goal["deadline"] = None
             migrated = True
+            
+    # 2. To-Dos Migration (Merge todos.json into goals.json)
+    TODOS_FILE = GOALS_FILE.parent / "todos.json"
+    if TODOS_FILE.exists():
+        try:
+            with open(TODOS_FILE, 'r', encoding='utf-8') as f:
+                todos_data = json.load(f)
+                
+            todos = todos_data.get('todos', [])
+            if todos:
+                print(f"📦 Migrating {len(todos)} to-dos into goals...")
+                
+                # Get next ID
+                next_id = 1
+                all_ids = [g.get('id') for g in goals_data.get('goals', [])]
+                if all_ids:
+                    # Filter out non-integer IDs just in case
+                    int_ids = [id for id in all_ids if isinstance(id, int)]
+                    if int_ids:
+                        next_id = max(int_ids) + 1
+                
+                for todo in todos:
+                    status = 'completed' if todo.get('completed') else 'active'
+                    
+                    new_goal = {
+                        "id": next_id,
+                        "name": todo.get('title', 'Untitled Task'),
+                        "type": "task",  # New type for migrated to-dos
+                        "priority": "medium",
+                        "created_at": todo.get('created_at', datetime.now().isoformat()),
+                        "deadline": todo.get('deadline'),
+                        "status": status,
+                        "progress": 100 if status == 'completed' else 0,
+                        "sub_goals": [],
+                        "stages": {
+                            "positive": "Starting the task",
+                            "negative": "Facing blockers",
+                            "current": "Working on it",
+                            "improve": "Finalizing"
+                        }
+                    }
+                    
+                    if status == 'completed' and 'completed_at' in todo:
+                        new_goal['completed_at'] = todo['completed_at']
+                        
+                    goals_data['goals'].append(new_goal)
+                    next_id += 1
+                
+                migrated = True
+                
+            # Rename todos.json to indicate it's migrated
+            TODOS_FILE.rename(TODOS_FILE.with_suffix('.json.migrated'))
+            print("✅ To-dos migrated successfully.")
+            
+        except Exception as e:
+            print(f"❌ Failed to migrate to-dos: {e}")
     
     if migrated:
         save_goals(goals_data)

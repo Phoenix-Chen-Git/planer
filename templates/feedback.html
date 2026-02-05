@@ -124,8 +124,9 @@
                 <a href="/" class="nav-link">Dashboard</a>
                 <a href="/plan" class="nav-link">Plan</a>
                 <a href="/tasks" class="nav-link">Tasks</a>
-                <a href="/todos" class="nav-link">To-Dos</a>
+
                 <a href="/goals" class="nav-link">Goals</a>
+                <a href="/radar" class="nav-link">Radar</a>
                 <a href="/history" class="nav-link">History</a>
                 <a href="/feedback" class="nav-link active">Feedback</a>
                 <a href="/summary" class="nav-link">Summary</a>
@@ -203,8 +204,8 @@
             filtered.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
             container.innerHTML = filtered.map((fb, idx) => {
-                const realIdx = feedbackList.indexOf(fb);
                 const status = fb.status || 'pending';
+                const id = fb.id;
 
                 return `
                     <div class="feedback-item ${status}">
@@ -216,10 +217,10 @@
                                 <span class="status-badge status-${status}">${status}</span>
                             </div>
                             <div class="feedback-actions">
-                                ${status !== 'implemented' ? `<button class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem;" onclick="updateStatus(${realIdx}, 'implemented')" title="Mark as implemented">✅</button>` : ''}
-                                ${status !== 'dismissed' ? `<button class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem;" onclick="updateStatus(${realIdx}, 'dismissed')" title="Dismiss">✕</button>` : ''}
-                                ${status !== 'pending' ? `<button class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem;" onclick="updateStatus(${realIdx}, 'pending')" title="Reopen">🔄</button>` : ''}
-                                <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem; color: #f85149;" onclick="deleteFeedback(${realIdx})" title="Delete">🗑️</button>
+                                ${status !== 'implemented' ? `<button class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem;" onclick="updateStatus('${id}', 'implemented')" title="Mark as implemented">✅</button>` : ''}
+                                ${status !== 'dismissed' ? `<button class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem;" onclick="updateStatus('${id}', 'dismissed')" title="Dismiss">✕</button>` : ''}
+                                ${status !== 'pending' ? `<button class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem;" onclick="updateStatus('${id}', 'pending')" title="Reopen">🔄</button>` : ''}
+                                <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem; color: #f85149;" onclick="deleteFeedback('${id}')" title="Delete">🗑️</button>
                             </div>
                         </div>
                     </div>
@@ -264,9 +265,9 @@
             }
         }
 
-        async function updateStatus(idx, status) {
+        async function updateStatus(id, status) {
             try {
-                const response = await fetch(`/api/feedback/${idx}/status`, {
+                const response = await fetch(`/api/feedback/${id}/status`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ status })
@@ -275,23 +276,27 @@
                 if (response.ok) {
                     showToast(`Feedback marked as ${status}`);
                     await loadFeedback();
+                } else {
+                    showToast('Failed: Feedback not found', 'error');
                 }
             } catch (error) {
                 showToast('Failed to update status', 'error');
             }
         }
 
-        async function deleteFeedback(idx) {
+        async function deleteFeedback(id) {
             if (!confirm('Delete this feedback?')) return;
 
             try {
-                const response = await fetch(`/api/feedback/${idx}`, {
+                const response = await fetch(`/api/feedback/${id}`, {
                     method: 'DELETE'
                 });
 
                 if (response.ok) {
                     showToast('🗑️ Feedback deleted');
                     await loadFeedback();
+                } else {
+                    showToast('Failed to delete', 'error');
                 }
             } catch (error) {
                 showToast('Failed to delete feedback', 'error');
